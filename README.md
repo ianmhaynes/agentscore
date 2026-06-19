@@ -23,20 +23,32 @@ downloaded as CSV or Excel.
 - **Harcourts Property Hub** (`propertyhub.harcourts.com.au`) — confirmed
   this runs on a different platform entirely (Cloudhi/Rex Software, not
   Ray White's Dynamics) and added a second adapter (`CloudhiRexAdapter`)
-  for it. This adapter is regex/HTML-pattern based, not structured-JSON
-  based, and is marked `extraction_confidence: "medium"` accordingly.
-  Verified against real fetched page structure for one listing and one
-  index page — **not yet verified against a live full scrape** (pending
-  a real run through the deployed tool). Known limitations:
-    - Only parses page 1 of paginated results — no pagination handling
-      yet for `/listings/buy` or `/listings/sold`.
-    - Sold price visibility on `/listings/sold` has not been directly
-      confirmed — if the platform doesn't show it there, sold_price will
-      come back blank for all Cloudhi sold rows until investigated.
-    - Office name is not populated (not present in card-level HTML;
-      would need a per-listing detail page visit to get it reliably).
-    - Date listed / sold date are not populated for this adapter (not
-      present in the list-card HTML structure inspected).
+  for it. First attempt (parsing listing cards off the index page) matched
+  zero real listings on live test — the assumed card markup was wrong.
+  Rebuilt against **confirmed structure from live DevTools inspection**:
+  individual listing detail pages reliably expose
+  `<p class="fw-bold mb-0">Property for Sale</p>` (or "Sold Property"),
+  `<h1>{address}</h1>`, and `<h3>{price text}</h3>`. The adapter now
+  visits the index pages only to collect listing URLs, then visits each
+  listing's detail page individually for the actual data. Verified
+  against fixtures built directly from two real inspected pages (one
+  active, one sold) — **not yet verified against a full live scrape
+  through the deployed tool**. Marked `extraction_confidence: "medium"`
+  throughout (HTML-pattern based, not structured JSON like Ray White).
+  Known limitations:
+    - Only collects listing URLs from page 1 of `/listings/buy` and
+      `/listings/sold` — no pagination yet, so offices with many
+      listings will be undercounted.
+    - One HTTP request per listing (in addition to the two index page
+      requests) — meaningfully slower than the Ray White adapter, and
+      could be slow or hit a timeout for offices with hundreds of sold
+      listings.
+    - Agent name extraction is a best-effort pattern match against
+      rendered text near the profile link — confirmed working on the
+      two inspected examples, not guaranteed robust against every page
+      variant.
+    - date_listed / sold_date not populated (not found in the inspected
+      structure).
 
 This strongly suggests Ray White coverage works across **any Ray White
 office** running Dynamics, since the structure is a property of the

@@ -134,64 +134,133 @@ def test_cloudhi_detect_and_reject():
     from scraper import CloudhiRexAdapter
     adapter = CloudhiRexAdapter()
     cloudhi_html = '<html><head><link href="https://resources.cloudhi.io/css/main.css"></head></html>'
-    ray_white_html = '<html>window.INITIAL_STATE = {}; site uses raywhite branding</html>'
     unrelated_html = "<html><body>nothing here</body></html>"
     assert adapter.detect(cloudhi_html), "Should detect cloudhi.io marker"
     assert not adapter.detect(unrelated_html), "Should not false-positive on unrelated HTML"
     print("PASS: CloudhiRexAdapter.detect() correctly identifies Cloudhi pages")
 
 
-def test_cloudhi_card_parsing():
+def test_cloudhi_detail_page_parsing():
+    """
+    Fixtures shaped directly from live DevTools inspection of real
+    Harcourts Property Hub listing pages (June 2026):
+      - Active: propertyhub.harcourts.com.au/listing/r2-5119238-...
+      - Sold:   a sold listing on the same site
+    Confirmed real tags: <p class="fw-bold mb-0">, <h1>, <h3>.
+    """
     from scraper import CloudhiRexAdapter
 
-    fake_buy_html = """
-    <html><head><link rel="preload" href="https://resources.cloudhi.io/css/main.css"></head>
-    <body>
-    <div class="listing-card">
-    <a href="https://propertyhub.harcourts.com.au/listing/r2-5119238-5-13-mapleton-circuit-varsity-lakes-qld-4227"></a>
-    <a href="https://propertyhub.harcourts.com.au/property-hub/people/mitch-harrop"><img alt="Mitch Harrop"></a>
-    <h6><a href="...">Vacant Tri-Level Townhouse</a></h6>
-    Offers Over $979,000 5/13 Mapleton Circuit, Varsity Lakes, QLD 4227
-    </div>
-    <div class="listing-card">
-    <a href="https://propertyhub.harcourts.com.au/listing/r2-4852701-117-aylesham-drive-bonogin-qld-4213"></a>
-    <a href="https://propertyhub.harcourts.com.au/property-hub/people/talei-kelly"><img alt="Talei Kelly"></a>
-    <h6><a href="...">Auction Property</a></h6>
-    AUCTION 117 Aylesham Drive, Bonogin, QLD 4213
-    </div>
+    fake_active_detail = """
+    <html><body>
+    <p class="fw-bold mb-0">Property for Sale</p>
+    <h1>5/13 Mapleton Circuit, Varsity Lakes, QLD 4227</h1>
+    <h3>Offers Over $979,000</h3>
+    <a href="/property-hub/people/george-may-2"><img alt="George May"></a>
+    George May
+    Harcourts Property Hub - Robina
     </body></html>
     """
-    fake_sold_html = """
-    <html><head><script src="https://assets.cloudhi.io/x.js"></script></head>
-    <body>
-    <div class="listing-card">
-    <a href="https://propertyhub.harcourts.com.au/listing/r2-1111111-1-test-street-robina-qld-4226"></a>
-    <a href="https://propertyhub.harcourts.com.au/property-hub/people/jane-doe"><img alt="Jane Doe"></a>
-    <h6><a href="...">Sold Test Property</a></h6>
-    $850,000 1 Test Street, Robina, QLD 4226
-    </div>
+    fake_sold_detail = """
+    <html><body>
+    <p class="fw-bold mb-0">Sold Property</p>
+    <h1>35/19 Carina Peak Drive, Varsity Lakes, QLD 4227</h1>
+    <h3>$925,000</h3>
+    <a href="/property-hub/people/mitch-harrop"><img alt="Mitch Harrop"></a>
+    Mitch Harrop
+    Harcourts Property Hub - Robina
     </body></html>
     """
 
     adapter = CloudhiRexAdapter()
     logs = []
-    active = adapter._parse_cards_from_html(fake_buy_html, "https://propertyhub.harcourts.com.au", "Active", "active", logs.append)
-    assert len(active) == 2
-    assert active[0].guide_price == "979000"
-    assert active[0].address == "5/13 Mapleton Circuit, Varsity Lakes, QLD 4227"
-    assert "$" not in active[0].address, "Address must not contain stray price digits"
-    assert active[1].guide_price == "", "AUCTION listing should have no parsed numeric price"
-    assert active[0].extraction_confidence == "medium", "Cloudhi adapter must mark medium confidence"
+    active = adapter._parse_detail_page(
+        fake_active_detail, "https://propertyhub.harcourts.com.au/listing/r2-5119238-test",
+        "https://propertyhub.harcourts.com.au", logs.append
+    )
+    assert active.status == "Active"
+    assert active.address == "5/13 Mapleton Circuit, Varsity Lakes, QLD 4227"
+    assert active.guide_price == "979000"
+    assert active.sold_price == ""
+    assert active.agent_name == "George May"
+    assert active.extraction_confidence == "medium"
 
     logs2 = []
-    sold = adapter._parse_cards_from_html(fake_sold_html, "https://propertyhub.harcourts.com.au", "Sold", "sold", logs2.append)
-    assert len(sold) == 1
-    assert sold[0].sold_price == "850000"
-    assert sold[0].guide_price == "", "Sold row should not populate guide_price"
+    sold = adapter._parse_detail_page(
+        fake_sold_detail, "https://propertyhub.harcourts.com.au/listing/r2-1111111-test",
+        "https://propertyhub.harcourts.com.au", logs2.append
+    )
+    assert sold.status == "Sold"
+    assert sold.address == "35/19 Carina Peak Drive, Varsity Lakes, QLD 4227"
+    assert sold.sold_price == "925000"
+    assert sold.guide_price == ""
+    assert sold.agent_name == "Mitch Harrop"
 
-    print("PASS: CloudhiRexAdapter parses active and sold listing cards correctly")
-    print(f"  Sample active row: {active[0]}")
-    print(f"  Sample sold row:   {sold[0]}")
+    print("PASS: CloudhiRexAdapter parses confirmed detail-page structure correctly")
+    print(f"  Sample active row: {active}")
+    print(f"  Sample sold row:   {sold}")
+
+
+def test_cloudhi_full_fetch():
+    """End-to-end test of the two-step index-then-detail fetch flow."""
+    from scraper import CloudhiRexAdapter
+    import scraper as scraper_module
+
+    fake_index_buy = """
+    <html><head><link href="https://resources.cloudhi.io/css/main.css"></head>
+    <body><a href="https://propertyhub.harcourts.com.au/listing/r2-5119238-test">card</a></body></html>
+    """
+    fake_index_sold = """
+    <html><body><a href="https://propertyhub.harcourts.com.au/listing/r2-1111111-test">card</a></body></html>
+    """
+    fake_active_detail = """
+    <html><body>
+    <p class="fw-bold mb-0">Property for Sale</p>
+    <h1>5/13 Mapleton Circuit, Varsity Lakes, QLD 4227</h1>
+    <h3>Offers Over $979,000</h3>
+    <a href="/property-hub/people/george-may-2"><img alt="George May"></a>
+    George May
+    Harcourts Property Hub - Robina
+    </body></html>
+    """
+    fake_sold_detail = """
+    <html><body>
+    <p class="fw-bold mb-0">Sold Property</p>
+    <h1>35/19 Carina Peak Drive, Varsity Lakes, QLD 4227</h1>
+    <h3>$925,000</h3>
+    <a href="/property-hub/people/mitch-harrop"><img alt="Mitch Harrop"></a>
+    Mitch Harrop
+    Harcourts Property Hub - Robina
+    </body></html>
+    """
+
+    class FakeCloudhiSession:
+        def __init__(self):
+            self.headers = {}
+        def get(self, url, timeout=None):
+            if url.endswith("/listings/buy"):
+                return FakeResponse(fake_index_buy)
+            elif url.endswith("/listings/sold"):
+                return FakeResponse(fake_index_sold)
+            elif "r2-5119238" in url:
+                return FakeResponse(fake_active_detail)
+            elif "r2-1111111" in url:
+                return FakeResponse(fake_sold_detail)
+            return FakeResponse("", status_code=404)
+
+    original_session = scraper_module.requests.Session
+    scraper_module.requests.Session = FakeCloudhiSession
+    try:
+        adapter = CloudhiRexAdapter()
+        logs = []
+        listings = adapter.fetch("https://propertyhub.harcourts.com.au", logs.append)
+        assert len(listings) == 2
+        active = [l for l in listings if l.status == "Active"][0]
+        sold = [l for l in listings if l.status == "Sold"][0]
+        assert active.guide_price == "979000"
+        assert sold.sold_price == "925000"
+        print("PASS: CloudhiRexAdapter full fetch() flow (index -> detail pages) works end-to-end")
+    finally:
+        scraper_module.requests.Session = original_session
 
 
 if __name__ == "__main__":
@@ -201,5 +270,6 @@ if __name__ == "__main__":
     test_normalize_sold()
     test_full_fetch_logic_with_monkeypatch()
     test_cloudhi_detect_and_reject()
-    test_cloudhi_card_parsing()
+    test_cloudhi_detail_page_parsing()
+    test_cloudhi_full_fetch()
     print("\nAll tests passed.")
