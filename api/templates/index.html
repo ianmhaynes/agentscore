@@ -19,9 +19,7 @@
     --stamp-sold: #4C7A6E;
     --error: #93412E;
   }
-
   * { box-sizing: border-box; }
-
   body {
     margin: 0;
     background: var(--paper);
@@ -29,13 +27,7 @@
     font-family: 'Inter', sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-
-  .wrap {
-    max-width: 1100px;
-    margin: 0 auto;
-    padding: 48px 32px 80px;
-  }
-
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 48px 32px 80px; }
   header {
     border-bottom: 2px solid var(--ink);
     padding-bottom: 20px;
@@ -46,224 +38,46 @@
     flex-wrap: wrap;
     gap: 12px;
   }
-
-  .wordmark {
-    font-family: 'Source Serif 4', serif;
-    font-weight: 700;
-    font-size: 30px;
-    letter-spacing: -0.01em;
-  }
+  .wordmark { font-family: 'Source Serif 4', serif; font-weight: 700; font-size: 30px; letter-spacing: -0.01em; }
   .wordmark span { color: var(--verdigris-dark); }
-
-  .subtitle {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: var(--ink-soft);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
-  .panel {
-    background: white;
-    border: 1px solid var(--rule);
-    border-radius: 2px;
-    padding: 28px;
-    margin-top: 28px;
-    box-shadow: 0 1px 0 rgba(27,42,51,0.04);
-  }
-
-  label.field-label {
-    display: block;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--ink-soft);
-    margin-bottom: 8px;
-  }
-
-  textarea#urls {
-    width: 100%;
-    min-height: 130px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-    line-height: 1.6;
-    padding: 14px;
-    border: 1px solid var(--rule);
-    border-radius: 2px;
-    background: var(--paper-dim);
-    color: var(--ink);
-    resize: vertical;
-  }
-  textarea#urls:focus {
-    outline: none;
-    border-color: var(--verdigris);
-    background: white;
-  }
-
-  .hint {
-    font-size: 12.5px;
-    color: var(--ink-soft);
-    margin-top: 8px;
-  }
-
-  .actions {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-top: 20px;
-  }
-
-  button.primary {
-    font-family: 'Inter', sans-serif;
-    font-weight: 600;
-    font-size: 14px;
-    background: var(--ink);
-    color: var(--paper);
-    border: none;
-    padding: 12px 22px;
-    border-radius: 2px;
-    cursor: pointer;
-    transition: background 0.15s ease;
-  }
+  .subtitle { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--ink-soft); letter-spacing: 0.04em; text-transform: uppercase; }
+  .panel { background: white; border: 1px solid var(--rule); border-radius: 2px; padding: 28px; margin-top: 28px; box-shadow: 0 1px 0 rgba(27,42,51,0.04); }
+  label.field-label { display: block; font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); margin-bottom: 8px; }
+  textarea#urls { width: 100%; min-height: 130px; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.6; padding: 14px; border: 1px solid var(--rule); border-radius: 2px; background: var(--paper-dim); color: var(--ink); resize: vertical; }
+  textarea#urls:focus { outline: none; border-color: var(--verdigris); background: white; }
+  .hint { font-size: 12.5px; color: var(--ink-soft); margin-top: 8px; }
+  .actions { display: flex; align-items: center; gap: 16px; margin-top: 20px; }
+  button.primary { font-family: 'Inter', sans-serif; font-weight: 600; font-size: 14px; background: var(--ink); color: var(--paper); border: none; padding: 12px 22px; border-radius: 2px; cursor: pointer; transition: background 0.15s ease; }
   button.primary:hover { background: var(--verdigris-dark); }
   button.primary:disabled { background: var(--rule); cursor: not-allowed; }
-
-  button.ghost {
-    font-family: 'Inter', sans-serif;
-    font-weight: 500;
-    font-size: 13px;
-    background: transparent;
-    color: var(--ink);
-    border: 1px solid var(--rule);
-    padding: 10px 16px;
-    border-radius: 2px;
-    cursor: pointer;
-  }
+  button.ghost { font-family: 'Inter', sans-serif; font-weight: 500; font-size: 13px; background: transparent; color: var(--ink); border: 1px solid var(--rule); padding: 10px 16px; border-radius: 2px; cursor: pointer; }
   button.ghost:hover { border-color: var(--ink); }
   button.ghost:disabled { color: var(--rule); border-color: var(--paper-dim); cursor: not-allowed; }
-
-  .status-line {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12.5px;
-    color: var(--ink-soft);
-  }
-
-  #log {
-    margin-top: 18px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: var(--ink-soft);
-    background: var(--paper-dim);
-    border: 1px solid var(--rule);
-    border-radius: 2px;
-    padding: 14px;
-    max-height: 180px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    display: none;
-  }
-
-  .office-results {
-    margin-top: 18px;
-    display: none;
-  }
-  .office-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--paper-dim);
-    font-size: 13px;
-  }
+  .status-line { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--ink-soft); }
+  #log { margin-top: 18px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--ink-soft); background: var(--paper-dim); border: 1px solid var(--rule); border-radius: 2px; padding: 14px; max-height: 180px; overflow-y: auto; white-space: pre-wrap; display: none; }
+  .office-results { margin-top: 18px; display: none; }
+  .office-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--paper-dim); font-size: 13px; }
   .office-row:last-child { border-bottom: none; }
   .office-row .ok { color: var(--verdigris-dark); font-weight: 600; }
   .office-row .fail { color: var(--error); font-weight: 600; }
-
-  .results-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-top: 40px;
-    margin-bottom: 14px;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-
-  .results-header h2 {
-    font-family: 'Source Serif 4', serif;
-    font-size: 22px;
-    margin: 0;
-  }
-
+  .results-header { display: flex; justify-content: space-between; align-items: baseline; margin-top: 40px; margin-bottom: 14px; flex-wrap: wrap; gap: 12px; }
+  .results-header h2 { font-family: 'Source Serif 4', serif; font-size: 22px; margin: 0; }
   .export-buttons { display: flex; gap: 10px; }
-
-  table#ledger {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-    background: white;
-  }
-  table#ledger th, table#ledger td {
-    text-align: left;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--paper-dim);
-    white-space: nowrap;
-  }
-  table#ledger th {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--ink-soft);
-    border-bottom: 2px solid var(--ink);
-    position: sticky;
-    top: 0;
-    background: white;
-  }
-  table#ledger td.num {
-    font-family: 'JetBrains Mono', monospace;
-  }
+  table#ledger { width: 100%; border-collapse: collapse; font-size: 13px; background: white; }
+  table#ledger th, table#ledger td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--paper-dim); white-space: nowrap; }
+  table#ledger th { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); border-bottom: 2px solid var(--ink); position: sticky; top: 0; background: white; }
+  table#ledger td.num { font-family: 'JetBrains Mono', monospace; }
   table#ledger tbody tr:hover { background: var(--paper-dim); }
-
-  .table-scroll {
-    max-height: 520px;
-    overflow: auto;
-    border: 1px solid var(--rule);
-  }
-
-  .stamp {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    padding: 3px 7px;
-    border-radius: 2px;
-    border: 1px solid currentColor;
-  }
+  .table-scroll { max-height: 520px; overflow: auto; border: 1px solid var(--rule); }
+  .stamp { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 7px; border-radius: 2px; border: 1px solid currentColor; }
   .stamp.active { color: var(--stamp-active); }
   .stamp.sold { color: var(--stamp-sold); }
-
-  .empty-state {
-    text-align: center;
-    padding: 60px 20px;
-    color: var(--ink-soft);
-    font-size: 14px;
-  }
-
-  footer {
-    margin-top: 60px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: var(--ink-soft);
-    border-top: 1px solid var(--rule);
-    padding-top: 16px;
-  }
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--ink-soft); font-size: 14px; }
+  footer { margin-top: 60px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-soft); border-top: 1px solid var(--rule); padding-top: 16px; }
 </style>
 </head>
 <body>
 <div class="wrap">
-
   <header>
     <div>
       <div class="wordmark">Agent<span>Score</span></div>
@@ -271,23 +85,18 @@
     </div>
     <div class="subtitle">Ray White / Dynamics network</div>
   </header>
-
   <div class="panel">
     <label class="field-label" for="urls">Office website addresses</label>
     <textarea id="urls" placeholder="raywhitemermaidwaters.com.au
 raywhitesurfersparadise.com.au"></textarea>
     <div class="hint">One office per line. Each will be checked for active and sold listings, with agent and price detail pulled directly from the page.</div>
-
     <div class="actions">
       <button class="primary" id="scrapeBtn" onclick="runScrape()">Scrape listings</button>
       <span class="status-line" id="statusLine"></span>
     </div>
-
     <div id="log"></div>
-
     <div class="office-results" id="officeResults"></div>
   </div>
-
   <div class="results-header" id="resultsHeader" style="display:none;">
     <h2 id="resultsTitle">Results</h2>
     <div class="export-buttons">
@@ -295,13 +104,9 @@ raywhitesurfersparadise.com.au"></textarea>
       <button class="ghost" onclick="exportFile('xlsx')">Download Excel</button>
     </div>
   </div>
-
   <div id="resultsArea"></div>
-
   <footer>AgentScore — registration numbers not currently included; pending a separate licensee-register lookup.</footer>
-
 </div>
-
 <script>
 let lastListings = [];
 
@@ -323,20 +128,16 @@ async function runScrape() {
     setStatus('Enter at least one office website first.');
     return;
   }
-
   const btn = document.getElementById('scrapeBtn');
   btn.disabled = true;
   btn.textContent = 'Scraping…';
   setStatus(`Checking ${urls.length} office${urls.length > 1 ? 's' : ''}…`);
-
   const logEl = document.getElementById('log');
   logEl.style.display = 'block';
   logEl.textContent = '';
-
   document.getElementById('officeResults').style.display = 'none';
   document.getElementById('resultsHeader').style.display = 'none';
   document.getElementById('resultsArea').innerHTML = '';
-
   try {
     const resp = await fetch('/api/scrape', {
       method: 'POST',
@@ -344,27 +145,21 @@ async function runScrape() {
       body: JSON.stringify({ urls })
     });
     const data = await resp.json();
-
     if (data.error) {
       setStatus('Error: ' + data.error);
       btn.disabled = false;
       btn.textContent = 'Scrape listings';
       return;
     }
-
     logEl.textContent = (data.log || []).join('\n');
-
     renderOfficeResults(data.office_results || []);
     renderListings(data.listings || []);
     lastListings = data.listings || [];
-
     const okCount = (data.office_results || []).filter(o => o.success).length;
     setStatus(`Done. ${okCount}/${(data.office_results||[]).length} office(s) scraped, ${lastListings.length} listing rows.`);
-
   } catch (err) {
     setStatus('Request failed: ' + err.message);
   }
-
   btn.disabled = false;
   btn.textContent = 'Scrape listings';
 }
@@ -386,16 +181,13 @@ function renderOfficeResults(results) {
 function renderListings(listings) {
   const header = document.getElementById('resultsHeader');
   const area = document.getElementById('resultsArea');
-
   if (listings.length === 0) {
     header.style.display = 'none';
     area.innerHTML = '<div class="empty-state">No listings found. Check the office addresses above and try again.</div>';
     return;
   }
-
   header.style.display = 'flex';
   document.getElementById('resultsTitle').textContent = `${listings.length} listing rows`;
-
   const rows = listings.map(l => `
     <tr>
       <td><span class="stamp ${l.status === 'Sold' ? 'sold' : 'active'}">${l.status || '—'}</span></td>
@@ -409,7 +201,6 @@ function renderListings(listings) {
       <td>${l.office_name || '—'}</td>
     </tr>
   `).join('');
-
   area.innerHTML = `
     <div class="table-scroll">
       <table id="ledger">
@@ -432,12 +223,34 @@ function renderListings(listings) {
   `;
 }
 
-function exportFile(format) {
+async function exportFile(format) {
   if (lastListings.length === 0) {
     setStatus('Nothing to export yet — run a scrape first.');
     return;
   }
-  window.location.href = `/api/export.${format}`;
+  try {
+    const resp = await fetch(`/api/export.${format}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ listings: lastListings })
+    });
+    if (!resp.ok) {
+      const data = await resp.json();
+      setStatus('Export failed: ' + (data.error || resp.statusText));
+      return;
+    }
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `agentscore_listings.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (err) {
+    setStatus('Export failed: ' + err.message);
+  }
 }
 </script>
 </body>

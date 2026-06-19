@@ -1,18 +1,22 @@
-from flask import Flask, request, jsonify, send_file, render_template
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from flask import Flask, request, jsonify, send_file
 import csv
 import io
 from scraper import scrape_offices
 
 app = Flask(__name__)
 
-# In-memory store of the most recent scrape result, keyed by a simple token,
-# so the export endpoints can re-serve the same data without re-scraping.
-_last_result = {"listings": []}
+_TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    with open(os.path.join(_TEMPLATE_DIR, "index.html"), "r", encoding="utf-8") as f:
+        return f.read()
 
 
 @app.route("/api/scrape", methods=["POST"])
@@ -30,16 +34,15 @@ def scrape():
     result = scrape_offices(urls, log=log)
     result["log"] = log_lines
 
-    _last_result["listings"] = result["listings"]
-
     return jsonify(result)
 
 
-@app.route("/api/export.csv")
+@app.route("/api/export.csv", methods=["POST"])
 def export_csv():
-    listings = _last_result.get("listings", [])
+    data = request.get_json(force=True)
+    listings = data.get("listings", [])
     if not listings:
-        return jsonify({"error": "No data to export yet — run a scrape first"}), 400
+        return jsonify({"error": "No data to export — run a scrape first"}), 400
 
     output = io.StringIO()
     fieldnames = list(listings[0].keys())
@@ -56,7 +59,7 @@ def export_csv():
     )
 
 
-@app.route("/api/export.xlsx")
+@app.route("/api/export.xlsx", methods=["POST"])
 def export_xlsx():
     try:
         import openpyxl
@@ -64,9 +67,10 @@ def export_xlsx():
     except ImportError:
         return jsonify({"error": "openpyxl not installed on server"}), 500
 
-    listings = _last_result.get("listings", [])
+    data = request.get_json(force=True)
+    listings = data.get("listings", [])
     if not listings:
-        return jsonify({"error": "No data to export yet — run a scrape first"}), 400
+        return jsonify({"error": "No data to export — run a scrape first"}), 400
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -77,7 +81,6 @@ def export_xlsx():
     for row in listings:
         ws.append([row.get(f, "") for f in fieldnames])
 
-    # Light formatting: bold header, autosize-ish columns
     for col_idx, name in enumerate(fieldnames, start=1):
         ws.cell(row=1, column=col_idx).font = openpyxl.styles.Font(bold=True)
         ws.column_dimensions[get_column_letter(col_idx)].width = max(14, len(name) + 2)
