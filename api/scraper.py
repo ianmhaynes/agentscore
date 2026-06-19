@@ -235,11 +235,15 @@ class CloudhiRexAdapter:
             log(f"    No address (h1) found on {listing_url}, skipping")
             return None
 
-        price_match = re.search(r'<h3[^>]*>([^<]+)</h3>', html)
+        # Price lives in a bare <h3> with NO class attribute — confirmed via
+        # raw HTML inspection that the page has several other <h3> tags with
+        # classes (e.g. class="display-1 mb-0" repeats the address) that
+        # would otherwise be matched first by a generic <h3> search.
+        price_match = re.search(r'<h3>([^<]+)</h3>', html)
         price_text = price_match.group(1).strip() if price_match else ""
         parsed_price = self._parse_price(price_text)
 
-        # Agent: look for a profile link to /people/{slug} and the name
+        # Agent name: look for a profile link to /people/{slug} and the name
         # immediately preceding it in rendered text. Best-effort — not
         # confirmed as a stable tag structure, unlike status/address/price.
         agent_match = re.search(
@@ -261,7 +265,12 @@ class CloudhiRexAdapter:
             if office_line_match:
                 agent_name = office_line_match.group(1).strip()
 
-        office_match = re.search(r'(Harcourts[^<\n]{0,60})', html)
+        # Office name: confirmed dedicated class via raw HTML inspection —
+        # far more reliable than searching for the literal word "Harcourts"
+        # anywhere on the page, which previously matched a font preload tag.
+        office_match = re.search(
+            r'<p[^>]*class="[^"]*agent-office[^"]*"[^>]*>([^<]+)</p>', html
+        )
         office_name = office_match.group(1).strip() if office_match else ""
 
         # suburb: second-to-last comma-separated segment of the address

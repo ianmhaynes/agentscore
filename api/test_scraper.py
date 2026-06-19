@@ -142,32 +142,46 @@ def test_cloudhi_detect_and_reject():
 
 def test_cloudhi_detail_page_parsing():
     """
-    Fixtures shaped directly from live DevTools inspection of real
-    Harcourts Property Hub listing pages (June 2026):
-      - Active: propertyhub.harcourts.com.au/listing/r2-5119238-...
-      - Sold:   a sold listing on the same site
-    Confirmed real tags: <p class="fw-bold mb-0">, <h1>, <h3>.
+    Fixtures shaped directly from live raw HTML inspection of real
+    Harcourts Property Hub listing pages (June 2026, via `requests.get`,
+    not a rendered/markdown view). Confirmed real structure:
+      - <p class="fw-bold mb-0">Property for Sale</p> / "Sold Property"
+      - <h1>{address}</h1>
+      - <h3>{price}</h3>  <- bare h3, NO class. Several OTHER h3 tags with
+        classes exist on the page (e.g. class="display-1 mb-0" repeating
+        the address) — a naive <h3> search matches those first, which was
+        a real bug found via raw HTML inspection and is covered here.
+      - <p class="agent-office">{office name}</p>  <- confirmed dedicated
+        class; previously matched a font preload tag instead, also a
+        real bug found and fixed.
     """
     from scraper import CloudhiRexAdapter
 
     fake_active_detail = """
-    <html><body>
+    <html><head>
+    <link rel="preload" href="https://resources.cloudhi.io/fonts/Harcourts-Script.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+    </head><body>
     <p class="fw-bold mb-0">Property for Sale</p>
     <h1>5/13 Mapleton Circuit, Varsity Lakes, QLD 4227</h1>
+    <h3 class="display-1 mb-0">5/13 Mapleton Circuit, Varsity Lakes, QLD 4227</h3>
+    <h3 class="text-cyan fw-light mb-0">Open for Inspection</h3>
     <h3>Offers Over $979,000</h3>
     <a href="/property-hub/people/george-may-2"><img alt="George May"></a>
     George May
-    Harcourts Property Hub - Robina
+    <p class="agent-office">Harcourts Property Hub - Robina</p>
     </body></html>
     """
     fake_sold_detail = """
-    <html><body>
+    <html><head>
+    <link rel="preload" href="https://resources.cloudhi.io/fonts/Harcourts-Script.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+    </head><body>
     <p class="fw-bold mb-0">Sold Property</p>
     <h1>35/19 Carina Peak Drive, Varsity Lakes, QLD 4227</h1>
+    <h3 class="display-1 mb-0">35/19 Carina Peak Drive, Varsity Lakes, QLD 4227</h3>
     <h3>$925,000</h3>
     <a href="/property-hub/people/mitch-harrop"><img alt="Mitch Harrop"></a>
     Mitch Harrop
-    Harcourts Property Hub - Robina
+    <p class="agent-office">Harcourts Property Hub - Robina</p>
     </body></html>
     """
 
@@ -179,9 +193,10 @@ def test_cloudhi_detail_page_parsing():
     )
     assert active.status == "Active"
     assert active.address == "5/13 Mapleton Circuit, Varsity Lakes, QLD 4227"
-    assert active.guide_price == "979000"
+    assert active.guide_price == "979000", f"FAIL: got {active.guide_price!r} (likely matched wrong h3)"
     assert active.sold_price == ""
     assert active.agent_name == "George May"
+    assert active.office_name == "Harcourts Property Hub - Robina", f"FAIL: got {active.office_name!r} (likely matched font preload)"
     assert active.extraction_confidence == "medium"
 
     logs2 = []
@@ -194,8 +209,10 @@ def test_cloudhi_detail_page_parsing():
     assert sold.sold_price == "925000"
     assert sold.guide_price == ""
     assert sold.agent_name == "Mitch Harrop"
+    assert sold.office_name == "Harcourts Property Hub - Robina"
 
     print("PASS: CloudhiRexAdapter parses confirmed detail-page structure correctly")
+    print("PASS: correctly avoids decoy <h3> tags and font-preload office name bugs")
     print(f"  Sample active row: {active}")
     print(f"  Sample sold row:   {sold}")
 
