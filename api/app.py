@@ -144,7 +144,7 @@ def export_rankings_xlsx():
     ws.cell(row=2, column=1).font = Font(italic=True, size=9, name="Arial", color="666666")
     ws.append([])
 
-    headers = ["#", "Agent", "Office", "Sales", "Avg Variance %", "Accuracy %", "Score", "Confidence", "Notes"]
+    headers = ["#", "Agent", "Office", "Total Sales", "Priced Sales", "Avg Variance %", "Accuracy %", "Score", "Confidence", "Notes"]
     header_row = 4
     ws.append(headers)
     for col_idx in range(1, len(headers) + 1):
@@ -157,6 +157,7 @@ def export_rankings_xlsx():
             s.agent_name,
             s.office_name,
             s.total_sales,
+            s.scored_sales,
             round(s.avg_variance_pct, 4),
             round(s.accuracy_pct, 4),
             s.score_band,
@@ -167,15 +168,15 @@ def export_rankings_xlsx():
     # Number formatting: percentages as 0.0%, matching xlsx skill conventions
     last_row = header_row + len(scores)
     for row_idx in range(header_row + 1, last_row + 1):
-        ws.cell(row=row_idx, column=5).number_format = "0.0%;(0.0%)"
-        ws.cell(row=row_idx, column=6).number_format = "0.0%"
+        ws.cell(row=row_idx, column=6).number_format = "0.0%;(0.0%)"
+        ws.cell(row=row_idx, column=7).number_format = "0.0%"
         # Medium/mixed confidence rows get a subtle flag so a reader knows
         # to treat them with more caution than high-confidence Ray White rows
-        conf_cell = ws.cell(row=row_idx, column=8)
+        conf_cell = ws.cell(row=row_idx, column=9)
         if conf_cell.value in ("medium", "mixed"):
             conf_cell.font = Font(name="Arial", color="9C6500")
 
-    col_widths = {1: 4, 2: 22, 3: 32, 4: 8, 5: 14, 6: 11, 7: 7, 8: 11, 9: 36}
+    col_widths = {1: 4, 2: 22, 3: 32, 4: 12, 5: 12, 6: 14, 7: 11, 8: 7, 9: 11, 10: 36}
     for col_idx, width in col_widths.items():
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
@@ -224,9 +225,18 @@ def export_rankings_xlsx():
         status = l.get("status", "")
         agent = l.get("agent_name", "")
         guide, sold = l.get("guide_price"), l.get("sold_price")
+        source = l.get("source_adapter", "")
         reason = ""
         if status != "Sold":
             reason = "Active listing (not yet sold)"
+        elif not guide and not sold:
+            reason = "No price published on listing page"
+        elif not guide and source == "cloudhi_rex":
+            # Confirmed via live inspection: many Harcourts/Cloudhi sold
+            # listings genuinely never had a guide price published at all
+            # (e.g. "sold without a price" disclaimer) — not a scraping
+            # gap, the source data itself only has the final sold figure.
+            reason = "No guide price published (sold without disclosed price)"
         elif not guide or not sold:
             reason = "Missing guide or sold price"
         elif agent not in ranked_agents:

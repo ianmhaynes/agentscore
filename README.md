@@ -50,6 +50,22 @@ adapters once their respective date fields are populated:
     Date" section (sold listings only). Both confirmed via raw HTML
     inspection of real listing pages.
 
+**⚠️ OPEN QUESTION — Harcourts "Added" date semantics not fully verified.**
+In a live scrape (June 2026), every active Harcourts/Cloudhi listing
+showed an "Added" date within the last few days of the scrape date,
+which is not plausible as the true original listing date for an
+established office's full active inventory. The regex itself is
+confirmed correctly matching real "Added {date}" text on the page (not
+a different field) — but it's unverified whether this field represents
+the **original listing date** or a **last-refreshed/reindexed
+timestamp** that Cloudhi updates periodically regardless of when the
+property actually went on the market. Until this is confirmed (e.g. by
+checking a listing known to have been on the market for months and
+seeing whether its "Added" date reflects that), **treat Harcourts'
+date_listed and days_on_market fields as unverified** — they may
+understate true time on market significantly. Ray White's dates are
+not affected by this question (confirmed reliable, structured data).
+
 ## 12-month window
 
 - **Ray White**: now respects the site's own default ~12-month window
@@ -95,6 +111,20 @@ file-page-1-only until extended.
   "Contact Agent", "Expressions of Interest", etc.) — many listings will
   have no parseable numeric price by design, same pattern the original
   Domain.com.au scraper had to handle.
+- **Harcourts/Cloudhi sold listings frequently have NO guide price at
+  all** — confirmed via live page inspection (June 2026): many properties
+  carry an explicit disclaimer ("This property is being sold without a
+  price & therefore a price guide cannot be provided") and the sold
+  listing page only ever shows the final sold figure, never an original
+  asking price. This is a genuine source-data limitation, not a scraping
+  gap — unlike Ray White, which retains both `price` and `soldPrice` on
+  every sold listing regardless of how it was marketed. **Practical
+  effect**: most Harcourts agents will show real `total_sales` activity
+  but few or zero `scored_sales`/variance results, since variance scoring
+  requires both a guide and sold price. The Agent Rankings export's
+  Summary Stats sheet reports per-adapter guide-price coverage so this
+  gap is visible rather than silently producing an empty-looking ranking
+  for an entire office.
 
 ## Architecture
 

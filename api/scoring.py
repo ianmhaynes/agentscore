@@ -128,7 +128,7 @@ def score_agents(listings, min_sales=MIN_SALES_FOR_RANKING):
             notes=_notes_for_band(band),
         ))
 
-    results.sort(key=lambda r: (-r.scored_sales, abs(r.avg_variance_pct)))
+    results.sort(key=lambda r: (-r.total_sales, abs(r.avg_variance_pct)))
     return results
 
 
@@ -150,7 +150,7 @@ def summary_stats(listings, scores):
     best = min(scores, key=lambda s: abs(s.avg_variance_pct)) if scores else None
     highest_volume = max(scores, key=lambda s: s.total_sales) if scores else None
 
-    return {
+    result = {
         "Total listing rows": total,
         "Rows with guide price": f"{has_guide} ({has_guide/total*100:.0f}%)" if total else "0",
         "Rows with sold price": f"{has_sold} ({has_sold/total*100:.0f}%)" if total else "0",
@@ -167,3 +167,21 @@ def summary_stats(listings, scores):
             if highest_volume else "—"
         ),
     }
+
+    # Per-adapter guide-price coverage — surfaces the real, structural gap
+    # confirmed via live inspection (June 2026): Ray White retains a guide
+    # price even on sold listings, while many Harcourts/Cloudhi listings
+    # are sold without ever publishing one at all ("sold without a price"
+    # disclaimer). This is NOT a scraping bug — see README for detail.
+    sold_rows = [r for r in listings if get(r, "status") == "Sold"]
+    for adapter in adapters:
+        adapter_sold = [r for r in sold_rows if get(r, "source_adapter") == adapter]
+        if not adapter_sold:
+            continue
+        priced = sum(1 for r in adapter_sold if get(r, "guide_price") and get(r, "sold_price"))
+        pct = priced / len(adapter_sold) * 100 if adapter_sold else 0
+        result[f"  {adapter}: sold listings with usable guide price"] = (
+            f"{priced} of {len(adapter_sold)} ({pct:.0f}%)"
+        )
+
+    return result
