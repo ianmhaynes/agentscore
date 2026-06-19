@@ -17,44 +17,60 @@ downloaded as CSV or Excel.
 
 - **Ray White Mermaid Waters** (`raywhitemermaidwaters.com.au`) — verified:
   18 active listings, 262 sold listings, full agent/price/date detail.
+  High confidence — structured JSON data, not pattern-matched.
 - **Ray White Surfers Paradise** (`raywhitesurfersparadise.com.au`) —
   verified: same `INITIAL_STATE` structure present, same URL pattern.
+- **Harcourts Property Hub** (`propertyhub.harcourts.com.au`) — confirmed
+  this runs on a different platform entirely (Cloudhi/Rex Software, not
+  Ray White's Dynamics) and added a second adapter (`CloudhiRexAdapter`)
+  for it. This adapter is regex/HTML-pattern based, not structured-JSON
+  based, and is marked `extraction_confidence: "medium"` accordingly.
+  Verified against real fetched page structure for one listing and one
+  index page — **not yet verified against a live full scrape** (pending
+  a real run through the deployed tool). Known limitations:
+    - Only parses page 1 of paginated results — no pagination handling
+      yet for `/listings/buy` or `/listings/sold`.
+    - Sold price visibility on `/listings/sold` has not been directly
+      confirmed — if the platform doesn't show it there, sold_price will
+      come back blank for all Cloudhi sold rows until investigated.
+    - Office name is not populated (not present in card-level HTML;
+      would need a per-listing detail page visit to get it reliably).
+    - Date listed / sold date are not populated for this adapter (not
+      present in the list-card HTML structure inspected).
 
-This strongly suggests the approach works across **any Ray White office**
-running the Dynamics platform, since the structure is a property of the
-platform, not the individual office site.
+This strongly suggests Ray White coverage works across **any Ray White
+office** running Dynamics, since the structure is a property of the
+platform. Cloudhi/Harcourts coverage is real but lower-confidence and
+file-page-1-only until extended.
 
 ## What's NOT yet confirmed
 
-- **Other franchises** (Harcourts, LJ Hooker, Century 21, First National) —
-  unknown whether they run an identical Dynamics build with the same field
-  names, or a different version. Each needs to be tested individually
-  before trusting this tool's output for them. If a site doesn't match the
-  Ray White adapter's `detect()` check, the tool will report
-  "No known platform detected" for that office rather than guessing.
-- **Independent agencies** — almost certainly use different platforms
-  entirely (Box+Co, Vault, custom WordPress, etc.) with no
-  `window.INITIAL_STATE`. Not supported at all yet. Adding support means
-  writing a new adapter per platform (see Architecture below).
-- **Agent registration/licence number** — confirmed NOT present anywhere
-  in this data (listing or agent objects). Getting this field would
-  require a separate lookup against the relevant state's real estate
-  licensee register (e.g. QLD Office of Fair Trading), matched by agent
-  name — not yet built.
+- **LJ Hooker, Century 21, First National** — unknown which platform
+  each runs on. Could be Cloudhi (in which case `CloudhiRexAdapter` may
+  already work, untested) or something else entirely. Each needs the
+  same detect-first treatment before trusting results.
+- **Independent agencies** — likely a long tail of different CMSs.
+  Not supported at all yet.
+- **Agent registration/licence number** — confirmed NOT present in
+  either Ray White's or Harcourts/Cloudhi's listing data. Would require
+  a separate lookup against the relevant state's real estate licensee
+  register (e.g. QLD Office of Fair Trading), matched by agent name.
 
 ## Known data quirks (confirmed via live testing)
 
-- `listingState` and `status`/`statusCode` can disagree on the same
-  record (one showing "Active" while the other shows "Sold"). **Always
-  trust `status`/`statusCode`** — `listingState` appears to not always be
-  kept in sync.
-- `price` is the reliable numeric guide price even when `displayPrice`
-  shows non-numeric text like "AUCTION" or "CONTACT AGENT".
-- A small share of sold listings (~12% in the Mermaid Waters sample) have
-  no `soldPrice` recorded at all, spread across multiple agents and years
-  — not an error, appears to be genuinely missing in Ray White's own data
-  (auction "price withheld" type listings). Exclude these rows from any
+- **Ray White**: `listingState` and `status`/`statusCode` can disagree
+  on the same record. **Always trust `status`/`statusCode`**.
+- **Ray White**: `price` is the reliable numeric guide price even when
+  `displayPrice` shows non-numeric text like "AUCTION" or "CONTACT AGENT".
+- **Ray White**: a small share of sold listings (~12% in the Mermaid
+  Waters sample) have no `soldPrice` recorded at all, spread across
+  multiple agents and years — appears genuinely missing in Ray White's
+  own data, not a scraping error. Exclude these rows from any
   variance/accuracy scoring rather than treating as zero.
+- **Harcourts/Cloudhi**: price is free text ("Offers Over $X", "AUCTION",
+  "Contact Agent", "Expressions of Interest", etc.) — many listings will
+  have no parseable numeric price by design, same pattern the original
+  Domain.com.au scraper had to handle.
 
 ## Architecture
 

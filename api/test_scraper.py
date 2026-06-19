@@ -130,10 +130,76 @@ def test_full_fetch_logic_with_monkeypatch():
     finally:
         scraper_module.requests.Session = original_session
 
+def test_cloudhi_detect_and_reject():
+    from scraper import CloudhiRexAdapter
+    adapter = CloudhiRexAdapter()
+    cloudhi_html = '<html><head><link href="https://resources.cloudhi.io/css/main.css"></head></html>'
+    ray_white_html = '<html>window.INITIAL_STATE = {}; site uses raywhite branding</html>'
+    unrelated_html = "<html><body>nothing here</body></html>"
+    assert adapter.detect(cloudhi_html), "Should detect cloudhi.io marker"
+    assert not adapter.detect(unrelated_html), "Should not false-positive on unrelated HTML"
+    print("PASS: CloudhiRexAdapter.detect() correctly identifies Cloudhi pages")
+
+
+def test_cloudhi_card_parsing():
+    from scraper import CloudhiRexAdapter
+
+    fake_buy_html = """
+    <html><head><link rel="preload" href="https://resources.cloudhi.io/css/main.css"></head>
+    <body>
+    <div class="listing-card">
+    <a href="https://propertyhub.harcourts.com.au/listing/r2-5119238-5-13-mapleton-circuit-varsity-lakes-qld-4227"></a>
+    <a href="https://propertyhub.harcourts.com.au/property-hub/people/mitch-harrop"><img alt="Mitch Harrop"></a>
+    <h6><a href="...">Vacant Tri-Level Townhouse</a></h6>
+    Offers Over $979,000 5/13 Mapleton Circuit, Varsity Lakes, QLD 4227
+    </div>
+    <div class="listing-card">
+    <a href="https://propertyhub.harcourts.com.au/listing/r2-4852701-117-aylesham-drive-bonogin-qld-4213"></a>
+    <a href="https://propertyhub.harcourts.com.au/property-hub/people/talei-kelly"><img alt="Talei Kelly"></a>
+    <h6><a href="...">Auction Property</a></h6>
+    AUCTION 117 Aylesham Drive, Bonogin, QLD 4213
+    </div>
+    </body></html>
+    """
+    fake_sold_html = """
+    <html><head><script src="https://assets.cloudhi.io/x.js"></script></head>
+    <body>
+    <div class="listing-card">
+    <a href="https://propertyhub.harcourts.com.au/listing/r2-1111111-1-test-street-robina-qld-4226"></a>
+    <a href="https://propertyhub.harcourts.com.au/property-hub/people/jane-doe"><img alt="Jane Doe"></a>
+    <h6><a href="...">Sold Test Property</a></h6>
+    $850,000 1 Test Street, Robina, QLD 4226
+    </div>
+    </body></html>
+    """
+
+    adapter = CloudhiRexAdapter()
+    logs = []
+    active = adapter._parse_cards_from_html(fake_buy_html, "https://propertyhub.harcourts.com.au", "Active", "active", logs.append)
+    assert len(active) == 2
+    assert active[0].guide_price == "979000"
+    assert active[0].address == "5/13 Mapleton Circuit, Varsity Lakes, QLD 4227"
+    assert "$" not in active[0].address, "Address must not contain stray price digits"
+    assert active[1].guide_price == "", "AUCTION listing should have no parsed numeric price"
+    assert active[0].extraction_confidence == "medium", "Cloudhi adapter must mark medium confidence"
+
+    logs2 = []
+    sold = adapter._parse_cards_from_html(fake_sold_html, "https://propertyhub.harcourts.com.au", "Sold", "sold", logs2.append)
+    assert len(sold) == 1
+    assert sold[0].sold_price == "850000"
+    assert sold[0].guide_price == "", "Sold row should not populate guide_price"
+
+    print("PASS: CloudhiRexAdapter parses active and sold listing cards correctly")
+    print(f"  Sample active row: {active[0]}")
+    print(f"  Sample sold row:   {sold[0]}")
+
+
 if __name__ == "__main__":
     test_extract_initial_state()
     test_detect()
     test_normalize_active()
     test_normalize_sold()
     test_full_fetch_logic_with_monkeypatch()
+    test_cloudhi_detect_and_reject()
+    test_cloudhi_card_parsing()
     print("\nAll tests passed.")
