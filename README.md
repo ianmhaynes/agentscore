@@ -16,39 +16,51 @@ downloaded as CSV or Excel.
 ## What's confirmed working (tested live, June 2026)
 
 - **Ray White Mermaid Waters** (`raywhitemermaidwaters.com.au`) — verified:
-  18 active listings, 262 sold listings, full agent/price/date detail.
-  High confidence — structured JSON data, not pattern-matched.
+  18 active listings, full agent/price/date detail. Sold listings now
+  default to the site's own ~12-month window (previously forced open to
+  full history via `?dateFilter=all`, which has been removed — see
+  "12-month window" below).
 - **Ray White Surfers Paradise** (`raywhitesurfersparadise.com.au`) —
   verified: same `INITIAL_STATE` structure present, same URL pattern.
-- **Harcourts Property Hub** (`propertyhub.harcourts.com.au`) — confirmed
-  this runs on a different platform entirely (Cloudhi/Rex Software, not
-  Ray White's Dynamics) and added a second adapter (`CloudhiRexAdapter`)
-  for it. First attempt (parsing listing cards off the index page) matched
-  zero real listings on live test — the assumed card markup was wrong.
-  Rebuilt against **confirmed structure from live DevTools inspection**:
-  individual listing detail pages reliably expose
-  `<p class="fw-bold mb-0">Property for Sale</p>` (or "Sold Property"),
-  `<h1>{address}</h1>`, and `<h3>{price text}</h3>`. The adapter now
-  visits the index pages only to collect listing URLs, then visits each
-  listing's detail page individually for the actual data. Verified
-  against fixtures built directly from two real inspected pages (one
-  active, one sold) — **not yet verified against a full live scrape
-  through the deployed tool**. Marked `extraction_confidence: "medium"`
-  throughout (HTML-pattern based, not structured JSON like Ray White).
-  Known limitations:
-    - Only collects listing URLs from page 1 of `/listings/buy` and
-      `/listings/sold` — no pagination yet, so offices with many
-      listings will be undercounted.
-    - One HTTP request per listing (in addition to the two index page
-      requests) — meaningfully slower than the Ray White adapter, and
-      could be slow or hit a timeout for offices with hundreds of sold
-      listings.
-    - Agent name extraction is a best-effort pattern match against
-      rendered text near the profile link — confirmed working on the
-      two inspected examples, not guaranteed robust against every page
-      variant.
-    - date_listed / sold_date not populated (not found in the inspected
-      structure).
+- **Harcourts Property Hub** (`propertyhub.harcourts.com.au`) — different
+  platform (Cloudhi/Rex Software). Address, price, office, agent name,
+  date_listed, sold_date, and days_on_market all confirmed working
+  against live data after three rounds of bug fixes (each one caught by
+  comparing assumed structure against real raw HTML, not guessing):
+    1. First attempt parsed listing cards off the index page — matched
+       zero real listings (wrong page shape assumed).
+    2. Rebuilt against confirmed detail-page tags — but the price and
+       office-name regexes matched the wrong things on real pages (an
+       unrelated `<h3>` repeating the address, and a font preload link
+       containing the word "Harcourts").
+    3. Fixed by using two confirmed dedicated CSS classes
+       (`agent-name`, `agent-office`) and a bare-`<h3>`-with-no-class
+       match for price, all verified against real raw HTTP responses.
+
+## Days on market
+
+Calculated client-side (in `calculate_days_on_market()`) from
+`date_listed` to `sold_date` for sold listings, or to today's date for
+still-active listings (i.e. "days on market so far"). Works for both
+adapters once their respective date fields are populated:
+  - **Ray White**: `date_listed` from `creationTime`, `sold_date` from
+    `soldDate` — both already present in the structured JSON data.
+  - **Harcourts/Cloudhi**: `date_listed` parsed from "Added {date}" text
+    near the Property ID; `sold_date` parsed from a dedicated "Sold
+    Date" section (sold listings only). Both confirmed via raw HTML
+    inspection of real listing pages.
+
+## 12-month window
+
+- **Ray White**: now respects the site's own default ~12-month window
+  for sold listings, rather than forcing `?dateFilter=all` to pull full
+  multi-year history. This both matches the "last 12 months is enough"
+  requirement and reduces request volume.
+- **Harcourts/Cloudhi**: no client-side or server-side 12-month filter
+  applied yet — every listing found on page 1 of the index is included
+  regardless of date. Since pagination isn't implemented either, real
+  exposure to old listings is naturally limited for now, but this
+  should be revisited once pagination is added.
 
 This strongly suggests Ray White coverage works across **any Ray White
 office** running Dynamics, since the structure is a property of the

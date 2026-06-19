@@ -10,6 +10,7 @@ site's structure can never silently corrupt another site's data.
 import re
 import json
 import time
+from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from urllib.parse import urlparse
 import requests
@@ -42,6 +43,7 @@ class Listing:
     sold_price: str = ""
     date_listed: str = ""
     sold_date: str = ""
+    days_on_market: str = ""
     agent_name: str = ""
     agent_email: str = ""
     agent_phone: str = ""
@@ -74,6 +76,33 @@ def normalize_domain(raw_url):
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+def calculate_days_on_market(date_listed_str, end_date_str=None):
+    """
+    Calendar days from date_listed to end_date (sold_date if provided,
+    otherwise today — i.e. days on market so far for an active listing).
+    Accepts ISO-format date strings (YYYY-MM-DD) or the first 10 chars of
+    a longer ISO timestamp. Returns "" if date_listed is missing/unparseable,
+    rather than raising — a malformed date shouldn't crash a whole scrape.
+    """
+    if not date_listed_str:
+        return ""
+    try:
+        start = datetime.strptime(date_listed_str[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return ""
+
+    if end_date_str:
+        try:
+            end = datetime.strptime(end_date_str[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return ""
+    else:
+        end = datetime.now().date()
+
+    delta = (end - start).days
+    return str(delta) if delta >= 0 else ""  # negative would indicate bad data — don't show it as real
+
+
 class RayWhiteDynamicsAdapter:
     """
     Confirmed working (manually verified June 2026) against:
@@ -96,7 +125,12 @@ class RayWhiteDynamicsAdapter:
 
         for label, path, status_filter in [
             ("active", "/properties/for-sale", "CUR"),
-            ("sold", "/properties/sold?dateFilter=all", "SLD"),
+            # NOTE: deliberately NOT overriding with ?dateFilter=all here —
+            # this lets the site's own default ~12-month window apply,
+            # rather than pulling full multi-year history. Confirmed via
+            # live testing that omitting the param yields recent sold
+            # listings only (41 vs 262 for the Mermaid Waters test case).
+            ("sold", "/properties/sold", "SLD"),
         ]:
             url = domain + path
             try:
@@ -125,6 +159,12 @@ class RayWhiteDynamicsAdapter:
                 office = e.get("office", {}) or {}
                 agents = e.get("agents", []) or [{}]
 
+                date_listed = (e.get("creationTime") or "")[:10]
+                sold_date = e.get("soldDate", "") or ""
+                days_on_market = calculate_days_on_market(
+                    date_listed, sold_date if sold_date else None
+                )
+
                 for agent in agents:
                     listings.append(Listing(
                         listing_id=str(e.get("listingId", listing_id)),
@@ -134,8 +174,9 @@ class RayWhiteDynamicsAdapter:
                         postcode=address.get("postCode", ""),
                         guide_price=str(e.get("price", "") or ""),
                         sold_price=str(e.get("soldPrice", "") or ""),
-                        date_listed=(e.get("creationTime") or "")[:10],
-                        sold_date=e.get("soldDate", "") or "",
+                        date_listed=date_listed,
+                        sold_date=sold_date,
+                        days_on_market=days_on_market,
                         agent_name=agent.get("fullName", ""),
                         agent_email=agent.get("email", ""),
                         agent_phone=agent.get("mobilePhone", ""),
@@ -210,6 +251,17 @@ class CloudhiRexAdapter:
         except ValueError:
             return ""
 
+    def _parse_human_date(self, date_text):
+        """Convert '17 June, 2026' or '17 June 2026' -> '2026-06-17'.
+        Returns '' on any parse failure rather than raising."""
+        if not date_text:
+            return ""
+        cleaned = date_text.strip().replace(",", "")
+        try:
+            return datetime.strptime(cleaned, "%d %B %Y").strftime("%Y-%m-%d")
+        except ValueError:
+            return ""
+
     def _collect_listing_urls(self, html, domain):
         urls = set()
         for m in re.finditer(r'href="(https://[^"]+/listing/[^"\s]+)"', html):
@@ -265,6 +317,28 @@ class CloudhiRexAdapter:
         )
         office_name = office_match.group(1).strip() if office_match else ""
 
+        # Dates — confirmed via raw HTML inspection of one active and one
+        # sold listing (June 2026):
+        #   Active: plain text "Added 17 June, 2026" near Property ID
+        #   Sold:   <h3>Sold Date</h3> ... <div class="col">16 June, 2026</div>
+        date_listed = ""
+        added_match = re.search(r'Added\s+(\d{1,2}\s+\w+,?\s+\d{4})', html)
+        if added_match:
+            date_listed = self._parse_human_date(added_match.group(1))
+
+        sold_date = ""
+        if status == "Sold":
+            sold_date_match = re.search(
+                r'Sold Date</h3>.*?<div[^>]*class="col"[^>]*>([^<]+)</div>',
+                html, re.DOTALL,
+            )
+            if sold_date_match:
+                sold_date = self._parse_human_date(sold_date_match.group(1))
+
+        days_on_market = calculate_days_on_market(
+            date_listed, sold_date if sold_date else None
+        ) if date_listed else ""
+
         # suburb: second-to-last comma-separated segment of the address
         suburb = ""
         parts = [p.strip() for p in address.split(",")]
@@ -282,8 +356,9 @@ class CloudhiRexAdapter:
             postcode="",
             guide_price=parsed_price if status == "Active" else "",
             sold_price=parsed_price if status == "Sold" else "",
-            date_listed="",
-            sold_date="",
+            date_listed=date_listed,
+            sold_date=sold_date,
+            days_on_market=days_on_market,
             agent_name=agent_name,
             agent_email="",
             agent_phone="",

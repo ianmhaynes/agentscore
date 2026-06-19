@@ -405,6 +405,7 @@ function renderListings(listings) {
       <td class="num">${fmtPrice(l.sold_price)}</td>
       <td class="num">${l.date_listed || '—'}</td>
       <td class="num">${l.sold_date || '—'}</td>
+      <td class="num">${l.days_on_market || '—'}</td>
       <td>${l.agent_name || '—'}</td>
       <td>${l.office_name || '—'}</td>
       <td class="num" title="${l.source_adapter || ''}">${l.extraction_confidence === 'medium' ? '~' : '✓'}</td>
@@ -423,6 +424,7 @@ function renderListings(listings) {
             <th>Sold price</th>
             <th>Listed</th>
             <th>Sold</th>
+            <th title="Days from listed date to sold date (or today, for active listings)">Days</th>
             <th>Agent</th>
             <th>Office</th>
             <th title="✓ = high confidence (structured data). ~ = medium confidence (pattern-matched, verify before relying on it)">Conf.</th>

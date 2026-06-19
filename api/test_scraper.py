@@ -288,6 +288,82 @@ def test_cloudhi_full_fetch():
         scraper_module.requests.Session = original_session
 
 
+def test_cloudhi_dates_and_days_on_market():
+    """
+    Confirmed via live raw HTML inspection (June 2026):
+      - Active listings: plain text "Added 17 June, 2026" near Property ID
+      - Sold listings:   <h3>Sold Date</h3> followed by a nested
+        <div class="col">16 June, 2026</div>
+    """
+    from scraper import CloudhiRexAdapter
+
+    fake_active = """
+    <html><body>
+    <p class="fw-bold mb-0">Property for Sale</p>
+    <h1>62/1 Bridgman Drive, Reedy Creek, QLD 4227</h1>
+    <h3 class="display-1 mb-0">62/1 Bridgman Drive, Reedy Creek, QLD 4227</h3>
+    <h3>Offers over $899,000</h3>
+    <a href="/property-hub/people/peter-boxsell"><img alt="Peter Boxsell"></a>
+    <p class="agent-name">Peter Boxsell</p>
+    <p class="agent-office">Harcourts Property Hub - Robina</p>
+    Added 17 June, 2026</small></span>
+    <span class="property-id-text mb-4">Property ID: #R2-5117315</span>
+    </body></html>
+    """
+    fake_sold = """
+    <html><body>
+    <p class="fw-bold mb-0">Sold Property</p>
+    <h1>65A/1-7 Ridgevista Court, Reedy Creek, QLD 4227</h1>
+    <h3 class="display-1 mb-0">65A/1-7 Ridgevista Court, Reedy Creek, QLD 4227</h3>
+    <h3>$935,000</h3>
+    <a href="/property-hub/people/raymond-pienaar"><img alt="Raymond Pienaar"></a>
+    <p class="agent-name">Raymond Pienaar</p>
+    <p class="agent-office">Harcourts Property Hub - Robina</p>
+    Added 1 March, 2026</small></span>
+    <h3>Sold Date</h3>
+    <div class="row g-0"><div class="col"><ul class="list-unstyled my-xxl-0">
+    <li class="list-item g-0 align-items-center"><div class="col">16 June, 2026</div></li>
+    </ul></div></div>
+    </body></html>
+    """
+
+    adapter = CloudhiRexAdapter()
+    logs = []
+    active = adapter._parse_detail_page(
+        fake_active, "https://propertyhub.harcourts.com.au/listing/test1",
+        "https://propertyhub.harcourts.com.au", logs.append
+    )
+    assert active.date_listed == "2026-06-17", f"FAIL: {active.date_listed!r}"
+    assert active.sold_date == ""
+
+    logs2 = []
+    sold = adapter._parse_detail_page(
+        fake_sold, "https://propertyhub.harcourts.com.au/listing/test2",
+        "https://propertyhub.harcourts.com.au", logs2.append
+    )
+    assert sold.date_listed == "2026-03-01", f"FAIL: {sold.date_listed!r}"
+    assert sold.sold_date == "2026-06-16", f"FAIL: {sold.sold_date!r}"
+    assert sold.days_on_market == "107", f"FAIL: {sold.days_on_market!r}"  # confirmed: 1 Mar -> 16 Jun = 107 days
+
+    print("PASS: CloudhiRexAdapter correctly extracts Added/Sold Date and computes days_on_market")
+    print(f"  Active row date_listed: {active.date_listed}")
+    print(f"  Sold row date_listed/sold_date/days_on_market: {sold.date_listed} / {sold.sold_date} / {sold.days_on_market}")
+
+
+def test_calculate_days_on_market():
+    from scraper import calculate_days_on_market
+    # Sold case: fixed start and end
+    assert calculate_days_on_market("2026-03-01", "2026-06-16") == "107"
+    # Missing date_listed: should return "" not crash
+    assert calculate_days_on_market("", "2026-06-16") == ""
+    # Malformed date: should return "" not crash
+    assert calculate_days_on_market("not-a-date", "2026-06-16") == ""
+    # Active (no end date) — just confirm it returns a non-negative number, not the exact value (depends on "today")
+    result = calculate_days_on_market("2026-06-01")
+    assert result.isdigit(), f"FAIL: expected a digit string, got {result!r}"
+    print("PASS: calculate_days_on_market handles sold, missing, malformed, and active cases correctly")
+
+
 if __name__ == "__main__":
     test_extract_initial_state()
     test_detect()
@@ -297,4 +373,6 @@ if __name__ == "__main__":
     test_cloudhi_detect_and_reject()
     test_cloudhi_detail_page_parsing()
     test_cloudhi_full_fetch()
+    test_cloudhi_dates_and_days_on_market()
+    test_calculate_days_on_market()
     print("\nAll tests passed.")
