@@ -243,27 +243,19 @@ class CloudhiRexAdapter:
         price_text = price_match.group(1).strip() if price_match else ""
         parsed_price = self._parse_price(price_text)
 
-        # Agent name: look for a profile link to /people/{slug} and the name
-        # immediately preceding it in rendered text. Best-effort — not
-        # confirmed as a stable tag structure, unlike status/address/price.
-        agent_match = re.search(
-            r'/people/([a-z0-9\-]+)"[^>]*>\s*(?:<[^>]+>\s*)*([A-Z][a-zA-Z\'\-]+(?:\s+[A-Z][a-zA-Z\'\-]+)+)[^\S\n]*\n',
-            html,
+        # Agent name: confirmed dedicated class via raw HTML inspection —
+        # sibling to the agent-office class fixed above. Far more reliable
+        # than the previous approach of matching plain text near the
+        # /people/{slug} profile link, which broke because the real link
+        # is immediately followed by an <img> tag and a data-agentname
+        # attribute (a slugified, lowercase value), not visible name text.
+        agent_name_match = re.search(
+            r'<p[^>]*class="[^"]*agent-name[^"]*"[^>]*>([^<]+)</p>', html
         )
-        agent_slug, agent_name = "", ""
-        if agent_match:
-            agent_slug = agent_match.group(1)
-            agent_name = agent_match.group(2).strip()
-        else:
-            # Fallback: name often appears as plain text on its own line
-            # right before the office line ("Harcourts Property Hub - X")
-            office_line_match = re.search(
-                r'^[^\S\n]*([A-Z][a-zA-Z\'\-]+\s+[A-Z][a-zA-Z\'\-]+)[^\S\n]*\n[^\S\n]*Harcourts',
-                html,
-                re.MULTILINE,
-            )
-            if office_line_match:
-                agent_name = office_line_match.group(1).strip()
+        agent_name = agent_name_match.group(1).strip() if agent_name_match else ""
+
+        agent_slug_match = re.search(r'/people/([a-z0-9\-]+)"', html)
+        agent_slug = agent_slug_match.group(1) if agent_slug_match else ""
 
         # Office name: confirmed dedicated class via raw HTML inspection —
         # far more reliable than searching for the literal word "Harcourts"

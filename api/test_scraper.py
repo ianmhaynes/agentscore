@@ -166,8 +166,12 @@ def test_cloudhi_detail_page_parsing():
     <h3 class="display-1 mb-0">5/13 Mapleton Circuit, Varsity Lakes, QLD 4227</h3>
     <h3 class="text-cyan fw-light mb-0">Open for Inspection</h3>
     <h3>Offers Over $979,000</h3>
-    <a href="/property-hub/people/george-may-2"><img alt="George May"></a>
-    George May
+    <a href="/property-hub/people/george-may-2" class="text-decoration-none">
+      <img alt="George May">
+    </a>
+    <a href="/property-hub/people/george-may-2" class="text-decoration-none">
+      <p class="agent-name">George May</p>
+    </a>
     <p class="agent-office">Harcourts Property Hub - Robina</p>
     </body></html>
     """
@@ -179,8 +183,12 @@ def test_cloudhi_detail_page_parsing():
     <h1>35/19 Carina Peak Drive, Varsity Lakes, QLD 4227</h1>
     <h3 class="display-1 mb-0">35/19 Carina Peak Drive, Varsity Lakes, QLD 4227</h3>
     <h3>$925,000</h3>
-    <a href="/property-hub/people/mitch-harrop"><img alt="Mitch Harrop"></a>
-    Mitch Harrop
+    <a href="/property-hub/people/mitch-harrop" class="text-decoration-none">
+      <img alt="Mitch Harrop">
+    </a>
+    <a href="/property-hub/people/mitch-harrop" class="text-decoration-none">
+      <p class="agent-name">Mitch Harrop</p>
+    </a>
     <p class="agent-office">Harcourts Property Hub - Robina</p>
     </body></html>
     """
@@ -235,8 +243,8 @@ def test_cloudhi_full_fetch():
     <h1>5/13 Mapleton Circuit, Varsity Lakes, QLD 4227</h1>
     <h3>Offers Over $979,000</h3>
     <a href="/property-hub/people/george-may-2"><img alt="George May"></a>
-    George May
-    Harcourts Property Hub - Robina
+    <p class="agent-name">George May</p>
+    <p class="agent-office">Harcourts Property Hub - Robina</p>
     </body></html>
     """
     fake_sold_detail = """
@@ -245,8 +253,8 @@ def test_cloudhi_full_fetch():
     <h1>35/19 Carina Peak Drive, Varsity Lakes, QLD 4227</h1>
     <h3>$925,000</h3>
     <a href="/property-hub/people/mitch-harrop"><img alt="Mitch Harrop"></a>
-    Mitch Harrop
-    Harcourts Property Hub - Robina
+    <p class="agent-name">Mitch Harrop</p>
+    <p class="agent-office">Harcourts Property Hub - Robina</p>
     </body></html>
     """
 
