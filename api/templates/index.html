@@ -293,6 +293,7 @@ raywhitesurfersparadise.com.au"></textarea>
     <div class="export-buttons">
       <button class="ghost" onclick="exportFile('csv')">Download CSV</button>
       <button class="ghost" onclick="exportFile('xlsx')">Download Excel</button>
+      <button class="ghost" onclick="exportRankings()">Download Agent Rankings</button>
     </div>
   </div>
 
@@ -463,6 +464,36 @@ async function exportFile(format) {
     window.URL.revokeObjectURL(url);
   } catch (err) {
     setStatus('Export failed: ' + err.message);
+  }
+}
+
+async function exportRankings() {
+  if (lastListings.length === 0) {
+    setStatus('Nothing to export yet — run a scrape first.');
+    return;
+  }
+  try {
+    const resp = await fetch('/api/export.rankings.xlsx', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ listings: lastListings })
+    });
+    if (!resp.ok) {
+      const data = await resp.json();
+      setStatus('Rankings export failed: ' + (data.error || resp.statusText));
+      return;
+    }
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'agentscore_rankings.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (err) {
+    setStatus('Rankings export failed: ' + err.message);
   }
 }
 </script>

@@ -1,2 +1,5 @@
 raw_*.html
+check_*.html
 push_error.txt
+*.html
+!api/templates/*.html
