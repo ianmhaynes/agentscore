@@ -37,7 +37,36 @@ downloaded as CSV or Excel.
        (`agent-name`, `agent-office`) and a bare-`<h3>`-with-no-class
        match for price, all verified against real raw HTTP responses.
 
-## Days on market
+## Discover Offices (new)
+
+A new panel lets you type a suburb/postcode (e.g. "Mermaid Waters QLD
+4218") and find every real estate agency active there, across all
+franchises — not just Ray White/Harcourts. This works by:
+
+1. Reading Domain.com.au's public agency directory for that suburb
+   (paginated, often 8+ pages, 100+ agencies for a Gold Coast suburb).
+2. Visiting each agency's individual Domain profile page to extract
+   their own website URL.
+3. Feeding those website URLs into the existing scrape pipeline — same
+   adapters, same detect-first logic, same "No known platform detected"
+   fallback for anything that isn't Ray White or Harcourts/Cloudhi.
+
+**⚠️ NOT YET CONFIRMED LIVE.** Unlike every adapter in `scraper.py`
+(each verified against real live HTTP responses before shipping), this
+discovery module's ability to reach Domain.com.au via plain HTTP
+requests has not been tested against the real site — only against
+fixtures built from content fetched through a different tool (which may
+have different bot-detection behaviour than a bare `requests.get()`
+call running on Vercel). Domain blocked early attempts in this
+project's history with a 403. The module is built defensively — every
+failure logs the real HTTP status rather than failing silently — so a
+live run will tell us definitively. If Domain blocks this in
+production, the practical fallback is the original manual process:
+find office URLs yourself and paste them into the existing URL box.
+
+See `discovery.py` for the implementation and `test_discovery.py` for
+tests, including one that specifically covers the "Domain returns 403"
+scenario gracefully.
 
 Calculated client-side (in `calculate_days_on_market()`) from
 `date_listed` to `sold_date` for sold listings, or to today's date for
@@ -130,20 +159,27 @@ file-page-1-only until extended.
 
 ```
 api/
-  app.py          Flask routes: page, /api/scrape, /api/export.csv, /api/export.xlsx
-  scraper.py       Adapter-based scraping core
+  app.py             Flask routes: page, /api/discover, /api/scrape,
+                      /api/export.csv, /api/export.xlsx,
+                      /api/export.rankings.xlsx
+  scraper.py          Adapter-based scraping core (Ray White, Harcourts/Cloudhi)
+  scoring.py          Agent variance scoring (guide vs sold price)
+  discovery.py         Domain.com.au agency discovery (NOT yet confirmed live)
   templates/
-    index.html     Frontend (paste URLs, view table, export)
-  test_scraper.py  Tests using fake INITIAL_STATE data (no network needed)
+    index.html        Frontend — discover area, paste URLs, view table, export
+  test_scraper.py     Tests for scraper.py (fake INITIAL_STATE / HTML data)
+  test_scoring.py     Tests for scoring.py
+  test_discovery.py   Tests for discovery.py (including a blocked-403 case)
 ```
 
-`scraper.py` is built as an adapter framework on purpose, even though only
-one adapter exists today (`RayWhiteDynamicsAdapter`). Each adapter
-implements:
+`scraper.py` is built as an adapter framework. Two adapters exist today:
+`RayWhiteDynamicsAdapter` (high confidence, structured JSON) and
+`CloudhiRexAdapter` (medium confidence, HTML pattern matching — used by
+Harcourts Property Hub). Each adapter implements:
 
 - `detect(html)` — does this site match this platform? Checked before
-  any parsing is attempted, so a site that merely resembles Ray White's
-  structure without actually being it won't get silently mis-parsed.
+  any parsing is attempted, so a site that merely resembles one
+  platform without actually being it won't get silently mis-parsed.
 - `fetch(domain, log)` — pull and normalize listings into the shared
   `Listing`/`Agent` dataclasses.
 
@@ -152,9 +188,15 @@ appending it to `ADAPTERS` in `scraper.py` — the app, frontend, and export
 logic don't need to change.
 
 Every `Listing` carries `source_adapter` and `extraction_confidence`
-fields, so lower-confidence extraction methods (e.g. a future generic
-JSON-LD or regex fallback adapter for independents) can be filtered out
-of scoring calculations downstream without losing the data entirely.
+fields, so lower-confidence rows can be filtered out of scoring or
+flagged for the reader without losing the data entirely. `scoring.py`
+uses this to mark each ranked agent's confidence as `high`, `medium`,
+or `mixed`.
+
+`discovery.py` is intentionally separate from `scraper.py` — it solves a
+different problem (finding *which* offices exist in an area) rather than
+extracting listing data from a known office, and its reliability against
+Domain.com.au is unconfirmed, unlike the adapters.
 
 ## Running locally
 

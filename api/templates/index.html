@@ -251,6 +251,44 @@
     font-size: 14px;
   }
 
+  #discoverLog {
+    margin-top: 18px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-soft);
+    background: var(--paper-dim);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: 14px;
+    max-height: 220px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    display: none;
+  }
+
+  .discover-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--paper-dim);
+    font-size: 13px;
+  }
+  .discover-row:last-child { border-bottom: none; }
+  .discover-row .agency-name { font-weight: 600; min-width: 220px; }
+  .discover-row .agency-website { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--verdigris-dark); }
+  .discover-row .agency-website.missing { color: var(--rule); font-style: italic; }
+
+  #discoverResults {
+    margin-top: 18px;
+  }
+  .discover-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+  }
+
   footer {
     margin-top: 60px;
     font-family: 'JetBrains Mono', monospace;
@@ -271,6 +309,18 @@
     </div>
     <div class="subtitle">Ray White (Dynamics) &amp; Harcourts (Cloudhi) networks</div>
   </header>
+
+  <div class="panel">
+    <label class="field-label" for="discoverArea">Discover offices in an area</label>
+    <input type="text" id="discoverArea" placeholder="Mermaid Waters QLD 4218" style="width: 100%; font-family: 'JetBrains Mono', monospace; font-size: 13px; padding: 12px 14px; border: 1px solid var(--rule); border-radius: 2px; background: var(--paper-dim); color: var(--ink); box-sizing: border-box;" />
+    <div class="hint">Searches Domain.com.au's agency directory for every agency active in this suburb/postcode, across all franchises, and looks up each one's own website. Not yet confirmed to work reliably in production — Domain has blocked direct scraping before, so results here are a live test, not a guarantee.</div>
+    <div class="actions">
+      <button class="primary" id="discoverBtn" onclick="runDiscover()">Discover offices</button>
+      <span class="status-line" id="discoverStatusLine"></span>
+    </div>
+    <div id="discoverLog"></div>
+    <div id="discoverResults"></div>
+  </div>
 
   <div class="panel">
     <label class="field-label" for="urls">Office website addresses</label>
@@ -305,9 +355,100 @@ raywhitesurfersparadise.com.au"></textarea>
 
 <script>
 let lastListings = [];
+let discoveredAgencies = [];
 
 function setStatus(msg) {
   document.getElementById('statusLine').textContent = msg;
+}
+
+function setDiscoverStatus(msg) {
+  document.getElementById('discoverStatusLine').textContent = msg;
+}
+
+async function runDiscover() {
+  const area = document.getElementById('discoverArea').value.trim();
+  if (!area) {
+    setDiscoverStatus('Enter a suburb and postcode first.');
+    return;
+  }
+
+  const btn = document.getElementById('discoverBtn');
+  btn.disabled = true;
+  btn.textContent = 'Discovering…';
+  setDiscoverStatus(`Searching Domain.com.au for agencies in ${area}…`);
+
+  const logEl = document.getElementById('discoverLog');
+  logEl.style.display = 'block';
+  logEl.textContent = '';
+  document.getElementById('discoverResults').innerHTML = '';
+
+  try {
+    const resp = await fetch('/api/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ area })
+    });
+    const data = await resp.json();
+
+    if (data.error) {
+      setDiscoverStatus('Error: ' + data.error);
+      btn.disabled = false;
+      btn.textContent = 'Discover offices';
+      return;
+    }
+
+    logEl.textContent = (data.log || []).join('\n');
+    discoveredAgencies = data.agencies || [];
+    renderDiscoverResults(discoveredAgencies);
+
+    const withWebsite = discoveredAgencies.filter(a => a.website).length;
+    if (discoveredAgencies.length === 0) {
+      setDiscoverStatus('No agencies found — Domain.com.au may be blocking this request. Check the log above.');
+    } else {
+      setDiscoverStatus(`Found ${discoveredAgencies.length} agencies, ${withWebsite} with a usable website.`);
+    }
+  } catch (err) {
+    setDiscoverStatus('Request failed: ' + err.message);
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Discover offices';
+}
+
+function renderDiscoverResults(agencies) {
+  const area = document.getElementById('discoverResults');
+  if (agencies.length === 0) {
+    area.innerHTML = '';
+    return;
+  }
+  const withWebsite = agencies.filter(a => a.website);
+  const rows = agencies.map(a => `
+    <div class="discover-row">
+      <span class="agency-name">${a.name}</span>
+      <span class="agency-website ${a.website ? '' : 'missing'}">${a.website || 'no website found'}</span>
+    </div>
+  `).join('');
+  area.innerHTML = `
+    <div class="discover-summary">
+      <span class="status-line">${agencies.length} agencies, ${withWebsite.length} with a website</span>
+      <button class="ghost" onclick="addDiscoveredToScrapeList()">Add all websites to scrape list</button>
+    </div>
+    <div class="table-scroll" style="max-height: 320px;">${rows}</div>
+  `;
+}
+
+function addDiscoveredToScrapeList() {
+  const websites = discoveredAgencies.filter(a => a.website).map(a => a.website);
+  if (websites.length === 0) {
+    setDiscoverStatus('No websites available to add.');
+    return;
+  }
+  const urlsBox = document.getElementById('urls');
+  const existing = urlsBox.value.split('\n').map(s => s.trim()).filter(Boolean);
+  const combined = Array.from(new Set([...existing, ...websites]));
+  urlsBox.value = combined.join('\n');
+  setStatus(`Added ${websites.length} discovered office(s) to the scrape list below.`);
+  urlsBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 function fmtPrice(v) {

@@ -13,6 +13,7 @@ import io
 from datetime import date
 from scraper import scrape_offices
 from scoring import score_agents, summary_stats
+from discovery import discover_agencies
 
 app = Flask(__name__)
 
@@ -26,6 +27,22 @@ def index():
     # different serverless runtimes (working directory assumptions vary).
     with open(os.path.join(_TEMPLATE_DIR, "index.html"), "r", encoding="utf-8") as f:
         return f.read()
+
+
+@app.route("/api/discover", methods=["POST"])
+def discover():
+    data = request.get_json(force=True)
+    area = data.get("area", "").strip()
+    if not area:
+        return jsonify({"error": "No suburb/postcode provided"}), 400
+
+    log_lines = []
+
+    def log(msg):
+        log_lines.append(msg)
+
+    agencies = discover_agencies(area, log=log)
+    return jsonify({"agencies": agencies, "log": log_lines})
 
 
 @app.route("/api/scrape", methods=["POST"])
