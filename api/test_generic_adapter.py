@@ -157,6 +157,52 @@ def test_collect_listing_urls_finds_homepage_embedded_listings():
           "confirmed present in CANDIDATE_INDEX_PATHS (the actual fix)")
 
 
+def test_collect_listing_urls_handles_relative_hrefs():
+    """
+    Regression test for a real bug found via live testing (June 2026):
+    Viridity Real Estate's actual listing links use relative hrefs with
+    NO leading slash — sometimes "../address-nsw-123456", sometimes a
+    completely bare "show-all-properties" with no prefix at all. The
+    original _collect_listing_urls() only matched absolute
+    (https://domain/...) and root-relative (/path) hrefs — neither
+    pattern ever matches this style, which meant 0 listings were found
+    even though they were sitting right there in the raw HTML, fetched
+    directly via curl with no rendering involved. Fixture below is
+    built directly from real curl output against the live site.
+    """
+    adapter = GenericFallbackAdapter()
+    domain = "https://viridityre.com.au"
+
+    real_href_dump = """
+    <html><body>
+    <a href="../"></a>
+    <a href="../11-blackwall-point-road-chiswick-nsw-6195827"></a>
+    <a href="../15-100-william-street-five-dock-nsw-6196139"></a>
+    <a href="../about"></a>
+    <a href="../contact"></a>
+    <a href="../search-rentals"></a>
+    <a href="/"></a>
+    <a href="/about-us"></a>
+    <a href="/upcoming-inspections-for-sale"></a>
+    <a href="show-all-properties"></a>
+    <a href="land-for-sale"></a>
+    <a href="recent-sales"></a>
+    </body></html>
+    """
+
+    found = adapter._collect_listing_urls(real_href_dump, domain)
+    assert any("6195827" in url for url in found), "FAIL: should find ../-prefixed relative listing link"
+    assert any("6196139" in url for url in found), "FAIL: should find second ../-prefixed relative listing link"
+    assert not any(url.rstrip("/").endswith("show-all-properties") for url in found), (
+        "FAIL: bare relative nav link should not be mistaken for a listing"
+    )
+    assert not any(url.rstrip("/").endswith("recent-sales") for url in found), (
+        "FAIL: bare relative nav link should not be mistaken for a listing"
+    )
+    print("PASS: relative href styles (../path and bare path) are correctly handled, "
+          "real listings found and nav links correctly excluded")
+
+
 def test_listing_url_heuristic_real_world_confirmed_urls():
     """
     Regression test for a real bug found via live testing (June 2026):
@@ -204,5 +250,6 @@ if __name__ == "__main__":
     test_missing_address_returns_none_not_garbage()
     test_looks_like_listing_url_heuristic()
     test_collect_listing_urls_finds_homepage_embedded_listings()
+    test_collect_listing_urls_handles_relative_hrefs()
     test_listing_url_heuristic_real_world_confirmed_urls()
     print("\nAll generic fallback adapter tests passed.")

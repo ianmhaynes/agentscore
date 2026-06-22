@@ -774,6 +774,25 @@ class GenericFallbackAdapter:
             url = domain + m.group(1)
             if self._looks_like_listing_url(url, domain):
                 urls.add(url)
+        # Confirmed real via live testing (June 2026): Viridity Real
+        # Estate's actual listing links use relative hrefs with NO
+        # leading slash at all — sometimes prefixed with "../" (e.g.
+        # href="../11-blackwall-point-road-chiswick-nsw-6195827"),
+        # sometimes completely bare (e.g. href="show-all-properties").
+        # Neither of the two patterns above ever matches this style —
+        # this was a genuine bug (not a content-rotation issue, as
+        # first suspected) that caused 0 listings to be found despite
+        # the links being right there in the raw HTML. "../" is
+        # stripped since it just means "relative to one level up from
+        # wherever this page lives," which for our purposes resolves to
+        # the same domain root the other two patterns already use.
+        for m in re.finditer(r'href="((?:\.\./)?[a-z0-9][a-z0-9\-]*)"', html, re.IGNORECASE):
+            relative_path = m.group(1)
+            if relative_path.startswith("../"):
+                relative_path = relative_path[3:]
+            url = domain + "/" + relative_path
+            if self._looks_like_listing_url(url, domain):
+                urls.add(url)
         return urls
 
     def _parse_detail_page(self, html, listing_url, domain, log):
