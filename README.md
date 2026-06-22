@@ -110,7 +110,56 @@ date_listed and days_on_market fields as unverified** — they may
 understate true time on market significantly. Ray White's dates are
 not affected by this question (confirmed reliable, structured data).
 
-## Generic Fallback Adapter (new, low confidence)
+## LJ Hooker Adapter (new, medium confidence) — and a national priority list
+
+A fourth adapter, `LJHookerAdapter`, covers one of LJ Hooker's website
+platform generations. LJ Hooker is the **2nd-largest real estate
+franchise network in Australia by office count** (~600 offices,
+~6,000 people, per industry sources — Ray White is largest at ~700+
+offices/13,000 members, Harcourts ~300+ Australian offices, Raine &
+Horne ~300 offices). Given that scale, a real priority list emerged
+from checking franchise-size data rather than testing networks at
+random:
+
+1. **Ray White** (~700+ offices) — covered, `RayWhiteDynamicsAdapter`
+2. **LJ Hooker** (~600 offices) — partially covered, see below
+3. **Harcourts** (~300+ AU offices) — covered, `CloudhiRexAdapter`
+4. **McGrath / Belle Property** — Belle covered via the generic
+   fallback adapter (low confidence); McGrath untested
+5. **Raine & Horne** (~300 offices) — untested
+
+**LJ Hooker runs at least TWO distinct website platforms across its
+network — a real, confirmed finding, not a guess:**
+
+- **Covered by `LJHookerAdapter`**: offices whose listing pages serve
+  from `property.ljhooker.com.au` with Schema.org structured markup
+  (`itemscope itemtype="https://schema.org/IndividualProduct"`). A
+  single confirmed field —
+  `<p itemprop="identifier">Sold For $1,670,000</p>` — gives both
+  status and price in one reliable string, more robust than the
+  decoy-tag-avoidance or URL-path tricks other adapters needed.
+  Confirmed live against a real Pyrmont, NSW listing via direct fetch.
+- **NOT covered**: offices on a separate, HubSpot-powered platform
+  (confirmed live at `broadbeach.ljhooker.com.au`) where listing data
+  loads via client-side JavaScript and is genuinely absent from the
+  plain HTML response — there's nothing for a non-browser scraper to
+  read at all on that platform without a real browser, which this
+  project doesn't use. `LJHookerAdapter.fetch()` will correctly return
+  an empty list (not a crash, not garbage data) for offices on this
+  platform, logging the specific reason (`officeId not found`).
+
+**How office discovery works**: each office's `officeId` (needed to
+build the search-results URL) is auto-discovered from links on that
+office's own homepage — the same thing a person would find by clicking
+"Recent Sales" in the footer and reading the URL. There's no known way
+to enumerate every LJ Hooker office's ID without visiting each office's
+own site first.
+
+See `scraper.py`'s `LJHookerAdapter` class and `test_ljhooker_adapter.py`
+for full detail, including a test confirming the HubSpot-platform case
+fails gracefully rather than silently.
+
+## Generic Fallback Adapter (low confidence)
 
 A third adapter, `GenericFallbackAdapter`, now sits at the end of the
 adapter chain as a last-resort catch-all for any site that doesn't
@@ -234,6 +283,7 @@ api/
     index.html        Frontend — discover area, paste URLs, view table, export
   test_scraper.py     Tests for scraper.py — Ray White & Cloudhi adapters
                         (fake INITIAL_STATE / HTML data)
+  test_ljhooker_adapter.py  Tests for the LJ Hooker adapter
   test_generic_adapter.py  Tests for the generic fallback adapter
   test_scoring.py     Tests for scoring.py
   test_discovery.py   Tests for discovery.py (including a blocked-403 case)

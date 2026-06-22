@@ -411,6 +411,228 @@ class CloudhiRexAdapter:
         return listings
 
 
+class LJHookerAdapter:
+    """
+    Adapter for one of LJ Hooker's website platform generations — the one
+    serving individual listing pages from property.ljhooker.com.au with
+    Schema.org structured markup, confirmed via live DevTools inspection
+    of a real Pyrmont (NSW) listing (June 2026):
+
+        <section class="property-overview container--section"
+                 itemscope itemtype="https://schema.org/IndividualProduct">
+          <h2 class="property-overview__address" itemprop="name">{address}</h2>
+          <p id="property-information" class="property-overview__status"
+             itemprop="identifier">Sold For $1,670,000</p>
+          ...
+        </section>
+
+    The single itemprop="identifier" field gives BOTH status and price in
+    one confirmed string ("Sold For $X" / "For Sale $X" or similar) — more
+    reliable than the separate URL-path or decoy-tag-avoidance tricks the
+    other adapters needed.
+
+    IMPORTANT — LJ Hooker runs MULTIPLE distinct website platforms across
+    its national network. A separate office (Broadbeach, QLD) was
+    confirmed via live inspection to run a different, HubSpot-powered
+    site (broadbeach.ljhooker.com.au) where listing data loads via
+    client-side JavaScript and is NOT present in the plain HTML response
+    at all — that platform is NOT covered by this adapter, and detecting
+    it would require a real browser, which this project does not use.
+    This adapter only covers offices on the property.ljhooker.com.au-style
+    platform. Real, but partial, coverage — same as every adapter in this
+    file covers what it covers and nothing more.
+
+    Listing index pages use an explicit, unambiguous query parameter
+    (more reliable than Belle's URL-path convention or a text label):
+        ljhooker.com.au/residential-search-results?officeId={id}&searchProfile=sold
+        ljhooker.com.au/residential-search-results?officeId={id}&searchProfile=buy
+    officeId must be discovered from a specific office's own site (it
+    appears in that office's own internal links, e.g. footer "View Our
+    Recent Sales" link) — there is no known way to enumerate all LJ Hooker
+    office IDs without visiting each office's site individually first.
+    """
+
+    name = "lj_hooker"
+
+    def detect(self, html):
+        # Distinguishing marker: this platform's pages reference
+        # property.ljhooker.com.au or carry the confirmed itemprop
+        # scaffolding; the other known LJ Hooker platform (HubSpot) does
+        # not have either of these markers in its raw HTML.
+        lowered = html.lower()
+        return "property.ljhooker.com.au" in lowered or (
+            "ljhooker" in lowered and 'itemprop="identifier"' in lowered
+        )
+
+    def _parse_price_and_status(self, status_price_text):
+        """'Sold For $1,670,000' -> ('Sold', '1670000'). Also handles
+        'For Sale $X', 'Offers Over $X', etc. — same discard rules as
+        other adapters for non-numeric price text (Contact Agent, etc.)."""
+        if not status_price_text:
+            return "", ""
+        text = status_price_text.strip()
+        is_sold = text.lower().startswith("sold")
+        status = "Sold" if is_sold else "Active"
+
+        price_match = re.search(r"\$\s*([\d,]+)", text)
+        price = ""
+        if price_match:
+            try:
+                price = str(int(price_match.group(1).replace(",", "")))
+            except ValueError:
+                price = ""
+        return status, price
+
+    def _collect_listing_urls(self, html, domain):
+        urls = set()
+        for m in re.finditer(r'href="(https://property\.ljhooker\.com\.au/[^"\s]+)"', html):
+            urls.add(m.group(1))
+        return urls
+
+    def _parse_detail_page(self, html, listing_url, domain, log):
+        status_price_match = re.search(
+            r'itemprop="identifier"[^>]*>([^<]+)<', html
+        )
+        if not status_price_match:
+            # Fallback: the confirmed visible text pattern even if the
+            # exact itemprop attribute ordering differs from what's expected
+            status_price_match = re.search(
+                r'>((?:Sold|For Sale)\s+For\s+\$[\d,]+|(?:Sold|For Sale)[^<]{0,40}\$[\d,]+)<',
+                html,
+            )
+        if not status_price_match:
+            log(f"    No status/price field found on {listing_url}, skipping")
+            return None
+
+        status, price = self._parse_price_and_status(status_price_match.group(1))
+
+        addr_match = re.search(r'itemprop="name"[^>]*>([^<]+)<', html)
+        if not addr_match:
+            addr_match = re.search(
+                r'<h2[^>]*class="[^"]*property-overview__address[^"]*"[^>]*>([^<]+)</h2>',
+                html,
+            )
+        address = addr_match.group(1).strip() if addr_match else ""
+        if not address:
+            log(f"    No address found on {listing_url}, skipping")
+            return None
+
+        # Agent: confirmed pattern "Contact: {Name} {Phone}" in the
+        # description area, plus a separate structured agent-profile link
+        # (e.g. agent.ljhooker.com.au/{slug}) in the listing banner.
+        agent_name, agent_phone = "", ""
+        contact_match = re.search(
+            r"Contact:\s*([A-Z][a-zA-Z'\-]+(?:\s+[A-Z][a-zA-Z'\-]+)+)\s+(\d[\d\s]{7,})",
+            html,
+        )
+        if contact_match:
+            agent_name = contact_match.group(1).strip()
+            agent_phone = re.sub(r"\s+", " ", contact_match.group(2).strip())
+        else:
+            # Fallback: agent.ljhooker.com.au profile link text
+            agent_link_match = re.search(
+                r'agent\.ljhooker\.com\.au/[a-z0-9\-]+"[^>]*>([^<]+)<', html
+            )
+            if agent_link_match:
+                agent_name = agent_link_match.group(1).strip()
+
+        suburb = ""
+        parts = [p.strip() for p in address.split(",")]
+        if len(parts) >= 2:
+            # last segment is often "SUBURB STATE" combined — take the
+            # second-to-last comma-separated piece if it looks state-free
+            suburb_candidate = parts[-1]
+            suburb_match = re.match(r"([A-Za-z\s]+?)\s+[A-Z]{2,3}$", suburb_candidate)
+            suburb = suburb_match.group(1).strip() if suburb_match else ""
+
+        listing_id_match = re.search(r"-([a-z0-9]{6,8})$", listing_url)
+        listing_id = listing_id_match.group(1) if listing_id_match else listing_url
+
+        return Listing(
+            listing_id=listing_id,
+            status=status,
+            address=address,
+            suburb=suburb,
+            postcode="",
+            guide_price=price if status == "Active" else "",
+            sold_price=price if status == "Sold" else "",
+            date_listed="",
+            sold_date="",
+            agent_name=agent_name,
+            agent_email="",
+            agent_phone=agent_phone,
+            agent_member_id="",
+            office_name="",
+            office_domain=domain,
+            listing_url=listing_url,
+            source_adapter=self.name,
+            extraction_confidence="medium",
+        )
+
+    def fetch(self, domain, log):
+        session = requests.Session()
+        session.headers.update({"User-Agent": USER_AGENT})
+
+        # officeId is office-specific and not derivable from the bare
+        # domain alone — search the homepage for a self-referencing
+        # search-results link that reveals this office's own officeId,
+        # the same way the user found it by inspecting their own site.
+        try:
+            resp = session.get(domain, timeout=REQUEST_TIMEOUT)
+        except requests.RequestException as e:
+            log(f"  ERROR fetching homepage: {e}")
+            return []
+
+        office_id_match = re.search(r"officeId=(\d+)", resp.text)
+        if not office_id_match:
+            log("  Could not find officeId on homepage — this office's site "
+                "structure may differ from the confirmed pattern")
+            return []
+        office_id = office_id_match.group(1)
+        log(f"  Found officeId={office_id}")
+
+        listing_urls = set()
+        for label, profile in [("active", "buy"), ("sold", "sold")]:
+            search_url = (
+                f"https://www.ljhooker.com.au/residential-search-results"
+                f"?officeId={office_id}&orderBy=date-desc&searchProfile={profile}"
+            )
+            try:
+                resp = session.get(search_url, timeout=REQUEST_TIMEOUT)
+            except requests.RequestException as e:
+                log(f"  ERROR fetching {label} index: {e}")
+                continue
+            if resp.status_code != 200:
+                log(f"  {label} index returned HTTP {resp.status_code}")
+                continue
+            found = self._collect_listing_urls(resp.text, domain)
+            log(f"  {label} index: found {len(found)} listing URL(s)")
+            listing_urls.update(found)
+            time.sleep(0.5)
+
+        if not listing_urls:
+            log("  No listing URLs found via search-results pages")
+            return []
+
+        log(f"  Visiting {len(listing_urls)} listing page(s)...")
+        listings = []
+        for listing_url in listing_urls:
+            try:
+                resp = session.get(listing_url, timeout=REQUEST_TIMEOUT)
+            except requests.RequestException as e:
+                log(f"    ERROR fetching {listing_url}: {e}")
+                continue
+            if resp.status_code != 200:
+                continue
+            parsed = self._parse_detail_page(resp.text, listing_url, domain, log)
+            if parsed:
+                listings.append(parsed)
+            time.sleep(0.3)
+
+        log(f"  Parsed {len(listings)} of {len(listing_urls)} listing page(s) successfully")
+        return listings
+
+
 class GenericFallbackAdapter:
     """
     Last-resort adapter for any site that doesn't match a known platform
@@ -616,7 +838,7 @@ class GenericFallbackAdapter:
         return listings
 
 
-ADAPTERS = [RayWhiteDynamicsAdapter(), CloudhiRexAdapter(), GenericFallbackAdapter()]
+ADAPTERS = [RayWhiteDynamicsAdapter(), CloudhiRexAdapter(), LJHookerAdapter(), GenericFallbackAdapter()]
 
 
 def scrape_office(raw_url, log=print):
