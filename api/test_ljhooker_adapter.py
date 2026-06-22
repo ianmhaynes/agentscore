@@ -5,7 +5,7 @@ DevTools and verified via direct fetch, June 2026.
 """
 import sys
 sys.path.insert(0, ".")
-from scraper import LJHookerAdapter, ADAPTERS
+from scraper import LJHookerAdapter, _build_adapters
 
 
 FAKE_SOLD_DETAIL = """
@@ -32,7 +32,7 @@ FAKE_ACTIVE_DETAIL = """
 
 
 def test_adapter_registered_before_generic_fallback():
-    names = [a.name for a in ADAPTERS]
+    names = [a.name for a in _build_adapters()]
     assert "lj_hooker" in names
     assert names.index("lj_hooker") < names.index("generic_fallback"), (
         "LJ Hooker is a precise adapter and must be tried before the generic fallback"

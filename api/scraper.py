@@ -14,6 +14,7 @@ from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from urllib.parse import urlparse
 import requests
+import extraction_tiers
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -688,43 +689,22 @@ class LJHookerAdapter:
 class GenericFallbackAdapter:
     """
     Last-resort adapter for any site that doesn't match a known platform
-    (Ray White Dynamics, Harcourts/Cloudhi). Built from live inspection of
-    Belle Property (June 2026), but designed to be tried broadly across
-    any agency site as a best-effort catch-all — NOT a precise,
-    confirmed-structure adapter the way the other two are.
+    (Ray White Dynamics, Harcourts/Cloudhi, LJ Hooker). Originally built
+    from Belle Property alone; now uses the tiered extraction pipeline
+    in extraction_tiers.py, built from 9 real, unrelated agency sites
+    inspected in one session (June 2026) — see that module's docstring
+    for the full list and findings.
 
-    CONFIRMED (via Belle Property DevTools inspection):
-      - Price: <div class="price">Offers from $795,000</div> (active) or
-        <div class="price">$1,335,000</div> (sold) — same class either way.
-      - Address: <h1 class="address">...</h1>
-      - Agent info: <section class="property-agents">...</section>
-      - Sold status is signalled by the LISTING URL itself living under a
-        path segment like /sold/ — not by text on the page. This is a
-        genuinely different signal from Ray White (status field in JSON)
-        and Harcourts (a text label on the page), and the user's own
-        confirmation that this generalizes ("they all follow the same
-        general plan, search for price/sold/$") is the basis for trying
-        this broadly rather than treating it as Belle-specific.
+    Tries, in order: JSON-LD -> meta tags -> a confirmed shared template
+    (Viridity/JBRE) -> the original Belle-derived class="price"/class=
+    "address" check -> (optionally) an LLM extraction call as the true
+    last resort, only if an API key is supplied.
 
-    NOT CONFIRMED for any site other than Belle:
-      - Whether other agencies actually use class="price"/class="address"
-        (likely NOT universal — this is almost certainly a per-CMS
-        convention, same as Cloudhi's agent-name/agent-office classes
-        were specific to that one platform). The fallback regexes below
-        exist specifically for sites where the exact class names don't
-        match, but a generic "find $ near digits" pattern is inherently
-        higher-risk for false positives (matching an unrelated price
-        mentioned in page copy, a related-listings carousel, etc.) than
-        every other adapter in this file.
-      - Whether a /sold/ URL segment is a universal convention or
-        Belle-specific. Sites without it will have ALL their listings
-        come back as "Active" even if some are actually sold — a real,
-        known limitation, not silently corrected.
-
-    Always marked extraction_confidence="low" — one tier below Cloudhi's
-    "medium" — so scoring and the UI can treat this data with
-    appropriately heavier skepticism than even the pattern-matched
-    Harcourts adapter.
+    extraction_confidence is set per-listing based on which tier
+    actually produced the result — "low" for every free tier (none of
+    them are confirmed universal), "low" for the LLM tier too for now
+    (no accuracy data yet at scale — see README for the explicit
+    decision not to claim higher confidence without evidence).
     """
 
     name = "generic_fallback"
@@ -738,6 +718,15 @@ class GenericFallbackAdapter:
         "/for-sale", "/listings/buy", "/sell/recently-sold",
         "/recently-sold", "/sold",
     ]
+
+    def __init__(self, llm_api_key=None):
+        # Optional — if not supplied, the LLM tier is simply skipped
+        # (extraction_tiers.extract_listing_fields handles this
+        # gracefully). Passed in per-instance rather than read from an
+        # environment variable so the same pattern as Google Places
+        # (key entered in the UI, sent per-request, never stored) holds.
+        self.llm_api_key = llm_api_key
+        self.llm_call_count = 0  # for real cost measurement, see README
 
     def detect(self, html):
         # Deliberately always matches — this is the catch-all, tried only
@@ -766,47 +755,36 @@ class GenericFallbackAdapter:
                 urls.add(url)
         return urls
 
-    def _parse_price(self, price_text):
-        if not price_text:
-            return ""
-        m = re.search(r"\$\s*([\d,]+)", price_text)
-        if not m:
-            return ""
-        try:
-            return str(int(m.group(1).replace(",", "")))
-        except ValueError:
-            return ""
-
     def _parse_detail_page(self, html, listing_url, domain, log):
-        # Status from URL path, NOT page text — confirmed approach for
-        # Belle Property. Sites that don't use a /sold/-style path will
-        # never report Sold via this adapter (known limitation, logged
-        # in the docstring, not hidden).
-        is_sold = bool(re.search(r"/sold/|/sold-", listing_url, re.IGNORECASE))
-        status = "Sold" if is_sold else "Active"
-
-        # Price: confirmed class="price" first, generic fallback second.
-        price_match = re.search(r'<div[^>]*class="[^"]*\bprice\b[^"]*"[^>]*>([^<]+)</div>', html)
-        if not price_match:
-            # Generic fallback: any element whose text is mostly a $ amount
-            price_match = re.search(r'>([^<]{0,40}\$[\d,]{4,}[^<]{0,20})<', html)
-        price_text = price_match.group(1).strip() if price_match else ""
-        parsed_price = self._parse_price(price_text)
-
-        # Address: confirmed class="address" first, generic fallback to h1.
-        addr_match = re.search(r'<h1[^>]*class="[^"]*\baddress\b[^"]*"[^>]*>([^<]+)</h1>', html)
-        if not addr_match:
-            addr_match = re.search(r'<h1[^>]*>([^<]+)</h1>', html)
-        address = addr_match.group(1).strip() if addr_match else ""
-        if not address:
-            log(f"    No address found on {listing_url}, skipping (too unreliable without one)")
+        result = extraction_tiers.extract_listing_fields(
+            html, listing_url, log=log, llm_api_key=self.llm_api_key,
+        )
+        if not result:
+            log(f"    No usable data found on {listing_url} via any tier "
+                f"(json_ld/meta_tags/known_template/{'llm' if self.llm_api_key else 'llm not enabled'})")
             return None
 
+        if result["tier"] == "llm_extraction":
+            self.llm_call_count += 1
+
+        address = result.get("address", "")
+        if not address:
+            return None
+
+        # Status: prefer whatever the tier found; fall back to the
+        # Belle-confirmed URL-path signal if the tier didn't determine one
+        # (JSON-LD in particular doesn't reliably distinguish active/sold).
+        status = result.get("status")
+        if not status:
+            is_sold = bool(re.search(r"/sold/|/sold-", listing_url, re.IGNORECASE))
+            status = "Sold" if is_sold else "Active"
+
+        price = result.get("price", "")
+
         # Agent info: confirmed section class="property-agents" — pull
-        # the first plausible name-shaped text inside it. Generic and
-        # best-effort; no fallback if this section is absent, since
-        # guessing agent names from unrelated text is too risky even for
-        # this already-low-confidence adapter.
+        # the first plausible name-shaped text inside it (Belle-derived,
+        # kept as a best-effort extra on top of the tiered fields above,
+        # which don't currently extract agent info).
         agent_name = ""
         agents_section = re.search(
             r'<section[^>]*class="[^"]*property-agents[^"]*"[^>]*>(.*?)</section>',
@@ -820,19 +798,20 @@ class GenericFallbackAdapter:
             if name_match:
                 agent_name = name_match.group(1).strip()
 
-        suburb = ""
-        parts = [p.strip() for p in address.split(",")]
-        if len(parts) >= 2:
-            suburb = parts[-2] if not re.search(r"\d", parts[-2]) else ""
+        suburb = result.get("suburb", "")
+        if not suburb:
+            parts = [p.strip() for p in address.split(",")]
+            if len(parts) >= 2:
+                suburb = parts[-2] if not re.search(r"\d", parts[-2]) else ""
 
         return Listing(
             listing_id=listing_url,
             status=status,
             address=address,
             suburb=suburb,
-            postcode="",
-            guide_price=parsed_price if status == "Active" else "",
-            sold_price=parsed_price if status == "Sold" else "",
+            postcode=result.get("postcode", ""),
+            guide_price=price if status == "Active" else "",
+            sold_price=price if status == "Sold" else "",
             date_listed="",
             sold_date="",
             agent_name=agent_name,
@@ -842,7 +821,7 @@ class GenericFallbackAdapter:
             office_name="",
             office_domain=domain,
             listing_url=listing_url,
-            source_adapter=self.name,
+            source_adapter=f"{self.name}:{result['tier']}",
             extraction_confidence="low",
         )
 
@@ -890,10 +869,23 @@ class GenericFallbackAdapter:
         return listings
 
 
-ADAPTERS = [RayWhiteDynamicsAdapter(), CloudhiRexAdapter(), LJHookerAdapter(), GenericFallbackAdapter()]
+def _build_adapters(llm_api_key=None):
+    """
+    Built per-call rather than as a single module-level constant so each
+    request can supply its own LLM API key (same pattern as the Google
+    Places key in discovery.py — entered in the UI, sent per-request,
+    never stored server-side). When no key is supplied, GenericFallback
+    Adapter still works exactly as before, just without tier 4 (LLM).
+    """
+    return [
+        RayWhiteDynamicsAdapter(),
+        CloudhiRexAdapter(),
+        LJHookerAdapter(),
+        GenericFallbackAdapter(llm_api_key=llm_api_key),
+    ]
 
 
-def scrape_office(raw_url, log=print):
+def scrape_office(raw_url, log=print, llm_api_key=None):
     """
     Scrape a single office. Tries each adapter's detect() against the
     homepage HTML; uses the first that matches. Returns (listings, error).
@@ -914,8 +906,9 @@ def scrape_office(raw_url, log=print):
     if resp.status_code != 200:
         return [], f"Site returned HTTP {resp.status_code}"
 
+    adapters = _build_adapters(llm_api_key=llm_api_key)
     matched_adapter = None
-    for adapter in ADAPTERS:
+    for adapter in adapters:
         if adapter.detect(resp.text):
             matched_adapter = adapter
             break
@@ -925,19 +918,24 @@ def scrape_office(raw_url, log=print):
 
     log(f"  Matched adapter: {matched_adapter.name}")
     listings = matched_adapter.fetch(domain, log)
+
+    if isinstance(matched_adapter, GenericFallbackAdapter) and matched_adapter.llm_call_count:
+        log(f"  (used LLM extraction tier {matched_adapter.llm_call_count} time(s) for this office)")
+
     return listings, None
 
 
-def scrape_offices(urls, log=print):
+def scrape_offices(urls, log=print, llm_api_key=None):
     """Scrape a list of office URLs. Returns dict with results + per-office status."""
     all_listings = []
     office_results = []
+    total_llm_calls = 0
 
     for raw_url in urls:
         raw_url = raw_url.strip()
         if not raw_url:
             continue
-        listings, error = scrape_office(raw_url, log=log)
+        listings, error = scrape_office(raw_url, log=log, llm_api_key=llm_api_key)
         office_results.append({
             "url": raw_url,
             "success": error is None,

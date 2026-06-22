@@ -55,12 +55,18 @@ def scrape():
     if not urls:
         return jsonify({"error": "No URLs provided"}), 400
 
+    # Optional — only used by GenericFallbackAdapter's tier 4 (LLM
+    # extraction), and only when every free tier fails to find a usable
+    # address. Sent per-request, never stored server-side, same pattern
+    # as the Google Places API key in /api/discover.
+    llm_api_key = data.get("llmApiKey", "").strip() or None
+
     log_lines = []
 
     def log(msg):
         log_lines.append(msg)
 
-    result = scrape_offices(urls, log=log)
+    result = scrape_offices(urls, log=log, llm_api_key=llm_api_key)
     result["log"] = log_lines
 
     return jsonify(result)

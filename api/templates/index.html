@@ -330,6 +330,15 @@
 raywhitesurfersparadise.com.au"></textarea>
     <div class="hint">One office per line. Each will be checked for active and sold listings, with agent and price detail pulled directly from the page.</div>
 
+    <details style="margin-top: 14px;">
+      <summary style="cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft);">Advanced: LLM extraction fallback (optional, has real cost)</summary>
+      <div style="margin-top: 10px;">
+        <label class="field-label" for="llmApiKey">Anthropic API key</label>
+        <input type="password" id="llmApiKey" placeholder="Only used as a last resort, for sites no free rule recognizes" style="width: 100%; font-family: 'JetBrains Mono', monospace; font-size: 13px; padding: 12px 14px; border: 1px solid var(--rule); border-radius: 2px; background: var(--paper-dim); color: var(--ink); box-sizing: border-box;" />
+        <div class="hint">When a site doesn't match any known platform or free extraction rule (JSON-LD, meta tags, known templates), this sends that one listing page to an LLM as a true last resort. Costs roughly $0.001\u2013$0.005 per listing that reaches this tier — most listings never will, since the free rules catch a lot. Leave blank to skip this tier entirely. Your key is sent only to this app's own server for this request, never stored.</div>
+      </div>
+    </details>
+
     <div class="actions">
       <button class="primary" id="scrapeBtn" onclick="runScrape()">Scrape listings</button>
       <span class="status-line" id="statusLine"></span>
@@ -514,7 +523,7 @@ async function runScrape() {
       const resp = await fetch('/api/scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: batch })
+        body: JSON.stringify({ urls: batch, llmApiKey: document.getElementById('llmApiKey').value.trim() })
       });
       const data = await resp.json();
 

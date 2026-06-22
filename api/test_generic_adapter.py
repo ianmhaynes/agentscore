@@ -3,7 +3,7 @@ catch-all adapter, built from live inspection of Belle Property (June 2026)
 but designed to be tried broadly across unrecognized agency sites."""
 import sys
 sys.path.insert(0, ".")
-from scraper import GenericFallbackAdapter, ADAPTERS, RayWhiteDynamicsAdapter, CloudhiRexAdapter
+from scraper import GenericFallbackAdapter, _build_adapters, RayWhiteDynamicsAdapter, CloudhiRexAdapter
 
 
 FAKE_ACTIVE_DETAIL = """
@@ -36,9 +36,10 @@ def test_adapter_order_generic_is_last():
     """The generic adapter's detect() always returns True, so it MUST be
     registered after Ray White and Cloudhi or it would silently steal
     every site, including ones the precise adapters should handle."""
-    assert ADAPTERS[-1].name == "generic_fallback"
-    assert any(isinstance(a, RayWhiteDynamicsAdapter) for a in ADAPTERS[:-1])
-    assert any(isinstance(a, CloudhiRexAdapter) for a in ADAPTERS[:-1])
+    adapters = _build_adapters()
+    assert adapters[-1].name == "generic_fallback"
+    assert any(isinstance(a, RayWhiteDynamicsAdapter) for a in adapters[:-1])
+    assert any(isinstance(a, CloudhiRexAdapter) for a in adapters[:-1])
     print("PASS: generic_fallback is registered last, after both precise adapters")
 
 

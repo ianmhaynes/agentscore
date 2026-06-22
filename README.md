@@ -237,55 +237,98 @@ cases confirming both the own-subdomain and officeId-fallback paths
 behave correctly, and that a genuinely unreachable office fails
 gracefully rather than crashing or fabricating data.
 
-## Generic Fallback Adapter (low confidence)
+## Generic Fallback Adapter — now a tiered extraction pipeline
 
-A third adapter, `GenericFallbackAdapter`, now sits at the end of the
-adapter chain as a last-resort catch-all for any site that doesn't
-match Ray White or Harcourts/Cloudhi. Built from live inspection of
-**Belle Property** (June 2026), but designed to be tried broadly:
+`GenericFallbackAdapter` sits at the end of the adapter chain as a
+last-resort catch-all for any site that doesn't match Ray White,
+Harcourts/Cloudhi, or LJ Hooker. It was originally built from Belle
+Property alone, then substantially rebuilt after a single research
+session inspecting **9 more real, unrelated agency sites** (June
+2026): traversgray, Richardson & Wrench Newtown, Highland Property,
+Crystal Realty, Wiseberry, Viridity Real Estate, JBRE Property, Park
+Properties, BresicWhitney, Pilcher Residential.
 
-- **Price**: `<div class="price">...</div>` confirmed exact on Belle —
-  same class for active ("Offers from $795,000") and sold ("$1,335,000")
-  listings, with a generic "any element whose text is mostly a `$`
-  amount" fallback for sites that don't use this exact class.
-- **Address**: `<h1 class="address">` confirmed, falling back to a plain
-  `<h1>` if the class is absent.
-- **Sold status comes from the URL itself** (e.g. a `/sold/` path
-  segment), not page text — a genuinely different signal from both
-  other adapters, confirmed via the user's own inspection of Belle's
-  site structure.
-- **Agent name**: pulled from `<section class="property-agents">` if
-  present; left blank otherwise rather than guessing from unrelated text.
+**The key finding from that session**: at least 8 genuinely different
+markup shapes for the same 3 facts (address, price, sold-or-not) —
+there is no single selector that works universally. What DOES
+generalize is a fixed *checking order*: try the most structured, most
+likely-correct source first, fall through if absent. That order is now
+implemented in `extraction_tiers.py`:
 
-**Always reports `extraction_confidence: "low"`** — one tier below
-Cloudhi's "medium." This is a meaningfully different trust level: Ray
-White is structured JSON (high), Cloudhi is pattern-matching against a
-*confirmed* HTML structure (medium), this is pattern-matching with
-*generic fallbacks* against structure confirmed on only one site and
-assumed (not verified) to generalize. The UI marks these rows with a
-`?` symbol (vs `~` for medium, `✓` for high) and the rankings Excel
-export visually flags them the same way it does medium/mixed rows.
+1. **JSON-LD** (`schema.org/Product`) — confirmed on Wiseberry, fully
+   structured (address as sub-fields, numeric price). Image URLs
+   referenced `agentboxcdn.com.au`, suggesting this may generalize to
+   other Agentbox-fed sites — unconfirmed beyond the one example.
+2. **Open Graph / Twitter Card meta tags** — confirmed on Highland
+   Property (`og:street-address`, `og:locality`, etc., plus a
+   `twitter:title` embedding status and sold date as text).
+3. **Known shared-template check** — confirmed **identical** markup
+   (`class="prop-title pull-left/pull-right margin0"`, combined "Sold
+   For $X" text) across two unrelated-looking agencies, Viridity Real
+   Estate and JBRE Property — proof that distinct agencies sometimes
+   run the literal same platform.
+   - **3b.** The original Belle-confirmed `class="price"`/`class="address"`
+     check, preserved as its own explicit tier.
+   - **3c.** The original fully-generic `$`-near-text scan, kept as the
+     lowest-confidence safety net below every more specific tier.
+4. **LLM extraction** (optional, real cost) — the true last resort,
+   only attempted when tiers 1–3c all fail to find a usable address,
+   and only if the user supplies an Anthropic API key in the UI (sent
+   per-request, never stored — same pattern as the Google Places key).
+   Sends a trimmed slice of the page's HTML to a fast model and asks
+   for structured JSON back. This is the one tier that can plausibly
+   handle a genuinely novel pattern — e.g. **traversgray's price hidden
+   inside a `<input type="hidden" name="extra_data[price]">` field**,
+   which none of tiers 1–3c would ever catch — without a human
+   inspecting the page first.
+
+**Cost discipline, tested and verified**: `test_extraction_tiers.py`
+includes `test_llm_tier_only_called_when_free_tiers_fail`, which mocks
+the LLM API call to *raise an exception if invoked* and confirms it
+never fires when a free tier already found a result. This is the core
+guarantee behind the cost story below — the expensive tier only runs
+when it's genuinely needed, not on every listing.
+
+**Cost — discussed and explicitly NOT yet measured at real scale.**
+A rough estimate (a few cases at $0.001–0.005 per listing that reaches
+tier 4) put a single full pass at the user's stated ~35,000-office
+target around **$1,400** — but that's one-time-per-refresh, not
+ongoing, and built on guessed inputs (average listings per office,
+what fraction of real sites need tier 4 at all). The agreed plan is to
+get a *real* number from a bounded test — running the layered system
+across one full region (~50 offices) and reading the actual bill
+afterward — rather than trusting the estimate at national scale.
+`GenericFallbackAdapter.llm_call_count` and the per-office log line
+(`"(used LLM extraction tier N time(s) for this office)"`) exist
+specifically to make that measurement possible from a real run.
+
+**Always reports `extraction_confidence: "low"`** for every tier,
+including the LLM one — there's no accuracy data yet to justify a
+higher confidence label for LLM-extracted rows, so it isn't claimed.
+`source_adapter` now includes which tier actually produced the row
+(e.g. `generic_fallback:json_ld`, `generic_fallback:llm_extraction`),
+visible in the UI's confidence-column tooltip.
 
 **Known limitations, stated plainly:**
-- `class="price"`/`class="address"` are confirmed for Belle Property
-  only — whether other agencies' sites happen to use the same
-  convention is unknown and will vary site to site.
-- The `/sold/`-path convention for status is Belle-specific in
-  confirmation; sites using a different convention (or none) will have
-  every listing reported as "Active" even if some are actually sold —
-  not corrected, not hidden, just a real limitation of a best-effort
-  fallback.
-- The candidate listing-index paths it tries
-  (`/buy`, `/properties/for-sale`, `/sold`, etc.) are drawn from
-  conventions seen across Ray White, Harcourts, and Belle's own menu
-  structure — not a guarantee any given site uses one of them.
+- None of tiers 1–3c are confirmed universal — each is confirmed on
+  exactly the site(s) named above, with unknown reach beyond that.
+- The `/sold/`-path convention (used as a fallback when a tier doesn't
+  itself determine status) is Belle-specific in confirmation.
+- The candidate listing-index paths `fetch()` tries are drawn from
+  conventions seen across Ray White, Harcourts, and Belle's menu
+  structure — not a guarantee any given site uses one of them. This
+  remains the actual bottleneck for many of the 9 newly-inspected
+  sites: even with all 4 extraction tiers ready, `fetch()` still needs
+  to *find* a listing's URL in the first place, and that discovery step
+  wasn't re-tested against these 9 sites in this round.
 - Because `detect()` always returns `True`, this adapter is registered
-  **strictly last** in `ADAPTERS` — see `test_generic_adapter.py`'s
-  `test_adapter_order_generic_is_last` for a test that would fail loudly
-  if this ordering were ever broken by a future edit.
+  **strictly last** — see `test_generic_adapter.py`'s
+  `test_adapter_order_generic_is_last`.
 
-See `scraper.py`'s `GenericFallbackAdapter` class and
-`test_generic_adapter.py` for full detail.
+See `extraction_tiers.py` for the full tiered pipeline and
+`test_extraction_tiers.py` for its test suite, and `scraper.py`'s
+`GenericFallbackAdapter` class for how it's wired into the adapter
+chain.
 
 ## 12-month window
 
@@ -354,21 +397,30 @@ api/
   app.py             Flask routes: page, /api/discover, /api/scrape,
                       /api/export.csv, /api/export.xlsx,
                       /api/export.rankings.xlsx
-  scraper.py          Adapter-based scraping core (Ray White, Harcourts/Cloudhi)
+  scraper.py          Adapter-based scraping core (Ray White, Harcourts/
+                       Cloudhi, LJ Hooker, generic fallback)
+  extraction_tiers.py  Tiered field extraction (JSON-LD, meta tags,
+                        known templates, generic scan, optional LLM
+                        last resort) — used by GenericFallbackAdapter
   scoring.py          Agent variance scoring (guide vs sold price)
-  discovery.py         Domain.com.au agency discovery (NOT yet confirmed live)
+  discovery.py         Google Places API office discovery (Text Search
+                        + Place Details — replaced an earlier
+                        Domain.com.au approach, confirmed blocked in
+                        production)
   templates/
     index.html        Frontend — discover area, paste URLs, view table, export
   test_scraper.py     Tests for scraper.py — Ray White & Cloudhi adapters
                         (fake INITIAL_STATE / HTML data)
   test_ljhooker_adapter.py  Tests for the LJ Hooker adapter
   test_generic_adapter.py  Tests for the generic fallback adapter
+  test_extraction_tiers.py Tests for extraction_tiers.py, including the
+                            LLM cost-control guarantee
   test_scoring.py     Tests for scoring.py
-  test_discovery.py   Tests for discovery.py (including a blocked-403 case)
+  test_discovery.py   Tests for discovery.py (Google Places API)
 ```
 
-`scraper.py` is built as an adapter framework. Two adapters exist today:
-`RayWhiteDynamicsAdapter` (high confidence, structured JSON) and
+`scraper.py` is built as an adapter framework. Four adapters exist
+today: `RayWhiteDynamicsAdapter` (high confidence, structured JSON),
 `CloudhiRexAdapter` (medium confidence, HTML pattern matching — used by
 Harcourts Property Hub). Each adapter implements:
 
