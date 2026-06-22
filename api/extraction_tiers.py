@@ -197,26 +197,44 @@ def try_known_shared_template(html, log=None):
     underlying platform — worth a dedicated check rather than relying
     solely on the fully generic scan in tier 4 (the old GenericFallback
     div-scanning logic, kept as the final layer below this module).
+
+    CONFIRMED REAL STRUCTURE (via raw curl against a live Viridity
+    listing page, June 2026) — the address h2 is NOT always a flat
+    "<h2 ...>text</h2>" the way the original fixture assumed. The real
+    page has a <br> and a nested <span> wrapping the actual text:
+        <h2 class="prop-title pull-right margin0">
+        <br>  <span style="font-size:0.8em;">76/3  Reid Avenue, Westmead</span>
+    The original regex required NO tags between the h2's opening tag and
+    its content ([^<]+), which silently failed on every real page using
+    this nested form — a genuine bug, not a content issue, found by
+    comparing this module's fixtures against real curl output. Fixed to
+    capture everything up to the closing </h2> (including nested tags)
+    and strip tags out afterward, rather than assuming flat text content.
     """
     status_match = re.search(
-        r'<h2[^>]*class="[^"]*prop-title[^"]*pull-left[^"]*"[^>]*>([^<]+)</h2>',
-        html,
+        r'<h2[^>]*class="[^"]*prop-title[^"]*pull-left[^"]*"[^>]*>(.*?)</h2>',
+        html, re.DOTALL,
     )
     if not status_match:
         return None
 
-    status_price_text = status_match.group(1).strip()
+    status_price_text = re.sub(r"<[^>]+>", " ", status_match.group(1)).strip()
+    status_price_text = re.sub(r"\s+", " ", status_price_text)
     is_sold = status_price_text.lower().startswith("sold")
     price = _parse_price(status_price_text)
 
     addr_match = re.search(
-        r'<h2[^>]*class="[^"]*prop-title[^"]*pull-right[^"]*"[^>]*>([^<]+)</h2>',
-        html,
+        r'<h2[^>]*class="[^"]*prop-title[^"]*pull-right[^"]*"[^>]*>(.*?)</h2>',
+        html, re.DOTALL,
     )
-    address = addr_match.group(1).strip() if addr_match else ""
+    if not addr_match:
+        return None
+    address = re.sub(r"<[^>]+>", " ", addr_match.group(1)).strip()
+    address = re.sub(r"\s+", " ", address)
 
     if not address:
         return None
+
 
     if log:
         log("    [tier 3: known shared template - prop-title] matched")

@@ -82,6 +82,33 @@ def test_tier3_known_shared_template():
     print("PASS: tier 3 (known shared template) matches the confirmed Viridity/JBRE pattern")
 
 
+def test_tier3_handles_nested_tags_in_address():
+    """
+    Regression test for a real bug found via live curl against
+    viridityre.com.au/76-3-reid-avenue-westmead-nsw-6194909 (June 2026).
+    The address <h2> is NOT flat text — it has a <br> and a nested
+    <span> wrapping the actual address. The original regex required no
+    tags between the h2's opening tag and its content, which silently
+    failed against this real, common page structure.
+    """
+    real_html = """
+    <div class="box-container2" style="background-color:white;color:black;">
+      <div class="clearfix padding30">
+        <h2 class="prop-title pull-left margin0" style="font-weight:normal!important;">Sold For $820,000 </h2>
+        <h2 class="prop-title pull-right margin0">
+        <br>				<span style="font-size:0.8em;">76/3  Reid Avenue, Westmead</span>
+        </h2>
+      </div>
+    </div>
+    """
+    result = et.try_known_shared_template(real_html)
+    assert result is not None, "FAIL: should match against real confirmed HTML with nested tags"
+    assert result["price"] == "820000"
+    assert result["status"] == "Sold"
+    assert "76/3" in result["address"] and "Reid Avenue" in result["address"]
+    print("PASS: tier 3 correctly handles real nested <br><span> address structure")
+
+
 def test_tier3b_class_price_address():
     result = et.try_class_price_address(BELLE_ACTIVE_HTML)
     assert result is not None
@@ -173,6 +200,7 @@ if __name__ == "__main__":
     test_tier1_json_ld()
     test_tier2_meta_tags()
     test_tier3_known_shared_template()
+    test_tier3_handles_nested_tags_in_address()
     test_tier3b_class_price_address()
     test_tier3c_generic_scan()
     test_priority_order_json_ld_beats_everything()
