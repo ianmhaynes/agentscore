@@ -36,7 +36,7 @@ class AgentScore:
     avg_variance_pct: float  # e.g. 0.027 for +2.7%
     accuracy_pct: float
     score_band: str  # "A" | "B" | "C"
-    confidence: str  # "high" | "medium" | "mixed"
+    confidence: str  # "high" | "medium" | "low" | "mixed"
     notes: str = ""
 
 

@@ -557,7 +557,7 @@ function renderListings(listings) {
       <td class="num">${l.days_on_market || '—'}</td>
       <td>${l.agent_name || '—'}</td>
       <td>${l.office_name || '—'}</td>
-      <td class="num" title="${l.source_adapter || ''}">${l.extraction_confidence === 'medium' ? '~' : '✓'}</td>
+      <td class="num" title="${l.source_adapter || ''} — ${l.extraction_confidence || 'high'} confidence">${l.extraction_confidence === 'low' ? '?' : (l.extraction_confidence === 'medium' ? '~' : '✓')}</td>
     </tr>
   `).join('');
 
@@ -576,7 +576,7 @@ function renderListings(listings) {
             <th title="Days from listed date to sold date (or today, for active listings)">Days</th>
             <th>Agent</th>
             <th>Office</th>
-            <th title="✓ = high confidence (structured data). ~ = medium confidence (pattern-matched, verify before relying on it)">Conf.</th>
+            <th title="✓ = high confidence (structured data). ~ = medium confidence (pattern-matched against confirmed structure). ? = low confidence (generic best-effort fallback, verify before relying on it)">Conf.</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>

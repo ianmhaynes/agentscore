@@ -110,6 +110,56 @@ date_listed and days_on_market fields as unverified** — they may
 understate true time on market significantly. Ray White's dates are
 not affected by this question (confirmed reliable, structured data).
 
+## Generic Fallback Adapter (new, low confidence)
+
+A third adapter, `GenericFallbackAdapter`, now sits at the end of the
+adapter chain as a last-resort catch-all for any site that doesn't
+match Ray White or Harcourts/Cloudhi. Built from live inspection of
+**Belle Property** (June 2026), but designed to be tried broadly:
+
+- **Price**: `<div class="price">...</div>` confirmed exact on Belle —
+  same class for active ("Offers from $795,000") and sold ("$1,335,000")
+  listings, with a generic "any element whose text is mostly a `$`
+  amount" fallback for sites that don't use this exact class.
+- **Address**: `<h1 class="address">` confirmed, falling back to a plain
+  `<h1>` if the class is absent.
+- **Sold status comes from the URL itself** (e.g. a `/sold/` path
+  segment), not page text — a genuinely different signal from both
+  other adapters, confirmed via the user's own inspection of Belle's
+  site structure.
+- **Agent name**: pulled from `<section class="property-agents">` if
+  present; left blank otherwise rather than guessing from unrelated text.
+
+**Always reports `extraction_confidence: "low"`** — one tier below
+Cloudhi's "medium." This is a meaningfully different trust level: Ray
+White is structured JSON (high), Cloudhi is pattern-matching against a
+*confirmed* HTML structure (medium), this is pattern-matching with
+*generic fallbacks* against structure confirmed on only one site and
+assumed (not verified) to generalize. The UI marks these rows with a
+`?` symbol (vs `~` for medium, `✓` for high) and the rankings Excel
+export visually flags them the same way it does medium/mixed rows.
+
+**Known limitations, stated plainly:**
+- `class="price"`/`class="address"` are confirmed for Belle Property
+  only — whether other agencies' sites happen to use the same
+  convention is unknown and will vary site to site.
+- The `/sold/`-path convention for status is Belle-specific in
+  confirmation; sites using a different convention (or none) will have
+  every listing reported as "Active" even if some are actually sold —
+  not corrected, not hidden, just a real limitation of a best-effort
+  fallback.
+- The candidate listing-index paths it tries
+  (`/buy`, `/properties/for-sale`, `/sold`, etc.) are drawn from
+  conventions seen across Ray White, Harcourts, and Belle's own menu
+  structure — not a guarantee any given site uses one of them.
+- Because `detect()` always returns `True`, this adapter is registered
+  **strictly last** in `ADAPTERS` — see `test_generic_adapter.py`'s
+  `test_adapter_order_generic_is_last` for a test that would fail loudly
+  if this ordering were ever broken by a future edit.
+
+See `scraper.py`'s `GenericFallbackAdapter` class and
+`test_generic_adapter.py` for full detail.
+
 ## 12-month window
 
 - **Ray White**: now respects the site's own default ~12-month window
@@ -182,7 +232,9 @@ api/
   discovery.py         Domain.com.au agency discovery (NOT yet confirmed live)
   templates/
     index.html        Frontend — discover area, paste URLs, view table, export
-  test_scraper.py     Tests for scraper.py (fake INITIAL_STATE / HTML data)
+  test_scraper.py     Tests for scraper.py — Ray White & Cloudhi adapters
+                        (fake INITIAL_STATE / HTML data)
+  test_generic_adapter.py  Tests for the generic fallback adapter
   test_scoring.py     Tests for scoring.py
   test_discovery.py   Tests for discovery.py (including a blocked-403 case)
 ```

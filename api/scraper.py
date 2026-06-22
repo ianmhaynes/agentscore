@@ -411,7 +411,212 @@ class CloudhiRexAdapter:
         return listings
 
 
-ADAPTERS = [RayWhiteDynamicsAdapter(), CloudhiRexAdapter()]
+class GenericFallbackAdapter:
+    """
+    Last-resort adapter for any site that doesn't match a known platform
+    (Ray White Dynamics, Harcourts/Cloudhi). Built from live inspection of
+    Belle Property (June 2026), but designed to be tried broadly across
+    any agency site as a best-effort catch-all — NOT a precise,
+    confirmed-structure adapter the way the other two are.
+
+    CONFIRMED (via Belle Property DevTools inspection):
+      - Price: <div class="price">Offers from $795,000</div> (active) or
+        <div class="price">$1,335,000</div> (sold) — same class either way.
+      - Address: <h1 class="address">...</h1>
+      - Agent info: <section class="property-agents">...</section>
+      - Sold status is signalled by the LISTING URL itself living under a
+        path segment like /sold/ — not by text on the page. This is a
+        genuinely different signal from Ray White (status field in JSON)
+        and Harcourts (a text label on the page), and the user's own
+        confirmation that this generalizes ("they all follow the same
+        general plan, search for price/sold/$") is the basis for trying
+        this broadly rather than treating it as Belle-specific.
+
+    NOT CONFIRMED for any site other than Belle:
+      - Whether other agencies actually use class="price"/class="address"
+        (likely NOT universal — this is almost certainly a per-CMS
+        convention, same as Cloudhi's agent-name/agent-office classes
+        were specific to that one platform). The fallback regexes below
+        exist specifically for sites where the exact class names don't
+        match, but a generic "find $ near digits" pattern is inherently
+        higher-risk for false positives (matching an unrelated price
+        mentioned in page copy, a related-listings carousel, etc.) than
+        every other adapter in this file.
+      - Whether a /sold/ URL segment is a universal convention or
+        Belle-specific. Sites without it will have ALL their listings
+        come back as "Active" even if some are actually sold — a real,
+        known limitation, not silently corrected.
+
+    Always marked extraction_confidence="low" — one tier below Cloudhi's
+    "medium" — so scoring and the UI can treat this data with
+    appropriately heavier skepticism than even the pattern-matched
+    Harcourts adapter.
+    """
+
+    name = "generic_fallback"
+
+    # Tried in order against the homepage to find a listing index page.
+    # Drawn from conventions confirmed across Ray White, Harcourts, and
+    # Belle Property's own "Properties for sale" / "Recently sold" menu
+    # items — NOT confirmed universal beyond those three.
+    CANDIDATE_INDEX_PATHS = [
+        "/buy", "/properties/for-sale", "/properties-for-sale",
+        "/for-sale", "/listings/buy", "/sell/recently-sold",
+        "/recently-sold", "/sold",
+    ]
+
+    def detect(self, html):
+        # Deliberately always matches — this is the catch-all, tried only
+        # after every more specific adapter has already had a chance to
+        # claim the site. Order in ADAPTERS is what makes this safe.
+        return True
+
+    def _looks_like_listing_url(self, url, domain):
+        if not url.startswith(domain):
+            return False
+        # crude heuristic: a property URL is usually a deep path with
+        # several hyphenated words (an address) — short paths are more
+        # likely to be nav links, not listings
+        path = url[len(domain):]
+        return path.count("-") >= 2 and len(path) > 20
+
+    def _collect_listing_urls(self, html, domain):
+        urls = set()
+        for m in re.finditer(r'href="(https?://[^"\s]+)"', html):
+            url = m.group(1)
+            if self._looks_like_listing_url(url, domain):
+                urls.add(url)
+        for m in re.finditer(r'href="(/[^"\s]+)"', html):
+            url = domain + m.group(1)
+            if self._looks_like_listing_url(url, domain):
+                urls.add(url)
+        return urls
+
+    def _parse_price(self, price_text):
+        if not price_text:
+            return ""
+        m = re.search(r"\$\s*([\d,]+)", price_text)
+        if not m:
+            return ""
+        try:
+            return str(int(m.group(1).replace(",", "")))
+        except ValueError:
+            return ""
+
+    def _parse_detail_page(self, html, listing_url, domain, log):
+        # Status from URL path, NOT page text — confirmed approach for
+        # Belle Property. Sites that don't use a /sold/-style path will
+        # never report Sold via this adapter (known limitation, logged
+        # in the docstring, not hidden).
+        is_sold = bool(re.search(r"/sold/|/sold-", listing_url, re.IGNORECASE))
+        status = "Sold" if is_sold else "Active"
+
+        # Price: confirmed class="price" first, generic fallback second.
+        price_match = re.search(r'<div[^>]*class="[^"]*\bprice\b[^"]*"[^>]*>([^<]+)</div>', html)
+        if not price_match:
+            # Generic fallback: any element whose text is mostly a $ amount
+            price_match = re.search(r'>([^<]{0,40}\$[\d,]{4,}[^<]{0,20})<', html)
+        price_text = price_match.group(1).strip() if price_match else ""
+        parsed_price = self._parse_price(price_text)
+
+        # Address: confirmed class="address" first, generic fallback to h1.
+        addr_match = re.search(r'<h1[^>]*class="[^"]*\baddress\b[^"]*"[^>]*>([^<]+)</h1>', html)
+        if not addr_match:
+            addr_match = re.search(r'<h1[^>]*>([^<]+)</h1>', html)
+        address = addr_match.group(1).strip() if addr_match else ""
+        if not address:
+            log(f"    No address found on {listing_url}, skipping (too unreliable without one)")
+            return None
+
+        # Agent info: confirmed section class="property-agents" — pull
+        # the first plausible name-shaped text inside it. Generic and
+        # best-effort; no fallback if this section is absent, since
+        # guessing agent names from unrelated text is too risky even for
+        # this already-low-confidence adapter.
+        agent_name = ""
+        agents_section = re.search(
+            r'<section[^>]*class="[^"]*property-agents[^"]*"[^>]*>(.*?)</section>',
+            html, re.DOTALL,
+        )
+        if agents_section:
+            name_match = re.search(
+                r'>([A-Z][a-zA-Z\'\-]+(?:\s+[A-Z][a-zA-Z\'\-]+)+)<',
+                agents_section.group(1),
+            )
+            if name_match:
+                agent_name = name_match.group(1).strip()
+
+        suburb = ""
+        parts = [p.strip() for p in address.split(",")]
+        if len(parts) >= 2:
+            suburb = parts[-2] if not re.search(r"\d", parts[-2]) else ""
+
+        return Listing(
+            listing_id=listing_url,
+            status=status,
+            address=address,
+            suburb=suburb,
+            postcode="",
+            guide_price=parsed_price if status == "Active" else "",
+            sold_price=parsed_price if status == "Sold" else "",
+            date_listed="",
+            sold_date="",
+            agent_name=agent_name,
+            agent_email="",
+            agent_phone="",
+            agent_member_id="",
+            office_name="",
+            office_domain=domain,
+            listing_url=listing_url,
+            source_adapter=self.name,
+            extraction_confidence="low",
+        )
+
+    def fetch(self, domain, log):
+        session = requests.Session()
+        session.headers.update({"User-Agent": USER_AGENT})
+
+        listing_urls = set()
+        for path in self.CANDIDATE_INDEX_PATHS:
+            url = domain + path
+            try:
+                resp = session.get(url, timeout=REQUEST_TIMEOUT)
+            except requests.RequestException:
+                continue
+            if resp.status_code != 200:
+                continue
+            found = self._collect_listing_urls(resp.text, domain)
+            if found:
+                log(f"  {path}: found {len(found)} candidate listing URL(s)")
+                listing_urls.update(found)
+            time.sleep(0.3)
+
+        if not listing_urls:
+            log("  No listing index page matched any known path pattern — "
+                "this site's structure is not covered by the generic fallback")
+            return []
+
+        log(f"  Visiting {len(listing_urls)} candidate listing page(s)...")
+        listings = []
+        for listing_url in listing_urls:
+            try:
+                resp = session.get(listing_url, timeout=REQUEST_TIMEOUT)
+            except requests.RequestException as e:
+                log(f"    ERROR fetching {listing_url}: {e}")
+                continue
+            if resp.status_code != 200:
+                continue
+            parsed = self._parse_detail_page(resp.text, listing_url, domain, log)
+            if parsed:
+                listings.append(parsed)
+            time.sleep(0.2)
+
+        log(f"  Parsed {len(listings)} of {len(listing_urls)} candidate page(s) successfully "
+            f"(extraction_confidence=low — verify before relying on this data)")
+        return listings
+
+
+ADAPTERS = [RayWhiteDynamicsAdapter(), CloudhiRexAdapter(), GenericFallbackAdapter()]
 
 
 def scrape_office(raw_url, log=print):

@@ -193,7 +193,7 @@ def export_rankings_xlsx():
         # Medium/mixed confidence rows get a subtle flag so a reader knows
         # to treat them with more caution than high-confidence Ray White rows
         conf_cell = ws.cell(row=row_idx, column=9)
-        if conf_cell.value in ("medium", "mixed"):
+        if conf_cell.value in ("medium", "low", "mixed"):
             conf_cell.font = Font(name="Arial", color="9C6500")
 
     col_widths = {1: 4, 2: 22, 3: 32, 4: 12, 5: 12, 6: 14, 7: 11, 8: 7, 9: 11, 10: 36}
