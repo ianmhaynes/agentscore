@@ -712,11 +712,18 @@ class GenericFallbackAdapter:
     # Tried in order against the homepage to find a listing index page.
     # Drawn from conventions confirmed across Ray White, Harcourts, and
     # Belle Property's own "Properties for sale" / "Recently sold" menu
-    # items — NOT confirmed universal beyond those three.
+    # items — NOT confirmed universal beyond those three. "" (the bare
+    # homepage itself) added after a real bug found via live testing:
+    # Viridity Real Estate (platform: premises.com.au, confirmed via its
+    # own footer credit) embeds real listing links DIRECTLY on its
+    # homepage rather than on any sub-path — none of the other candidate
+    # paths below ever surfaced them, so the homepage itself must also
+    # be scanned, not just used for detect(). "/show-all-properties" is
+    # premises.com.au's specific "Properties For Sale" index path.
     CANDIDATE_INDEX_PATHS = [
-        "/buy", "/properties/for-sale", "/properties-for-sale",
+        "", "/buy", "/properties/for-sale", "/properties-for-sale",
         "/for-sale", "/listings/buy", "/sell/recently-sold",
-        "/recently-sold", "/sold",
+        "/recently-sold", "/sold", "/show-all-properties",
     ]
 
     def __init__(self, llm_api_key=None):

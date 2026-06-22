@@ -118,6 +118,45 @@ def test_looks_like_listing_url_heuristic():
     print("PASS: listing-URL heuristic distinguishes real listings from nav links and other domains")
 
 
+def test_collect_listing_urls_finds_homepage_embedded_listings():
+    """
+    Regression test for a real bug found via live testing (June 2026):
+    Viridity Real Estate (platform: premises.com.au) embeds real listing
+    links DIRECTLY on its homepage, not on any sub-path. The candidate
+    index path list previously never included the bare homepage itself
+    ("" was missing), so these real listings were never found even
+    though they were sitting right there in the page that gets fetched
+    anyway for detect(). Confirmed fix: "" added to CANDIDATE_INDEX_PATHS.
+    """
+    adapter = GenericFallbackAdapter()
+    domain = "https://viridityre.com.au"
+
+    real_homepage_snippet = """
+    <html><body>
+    <a href="https://viridityre.com.au/buying">Buying</a>
+    <a href="https://viridityre.com.au/show-all-properties">Properties For Sale</a>
+    <a href="https://viridityre.com.au/upcoming-inspections-for-sale">Open Homes</a>
+    <a href="https://viridityre.com.au/68-74-church-street-cranebrook-nsw-6195951">
+      <img src="...">
+    </a>
+    <a href="https://viridityre.com.au/11-blackwall-point-road-chiswick-nsw-6195827">
+      <img src="...">
+    </a>
+    </body></html>
+    """
+
+    found = adapter._collect_listing_urls(real_homepage_snippet, domain)
+    assert len(found) == 2, f"Expected 2 real listings, got {len(found)}: {found}"
+    assert any("6195951" in url for url in found)
+    assert any("6195827" in url for url in found)
+    assert not any("show-all-properties" in url for url in found), "Nav link should not be mistaken for a listing"
+    assert "" in adapter.CANDIDATE_INDEX_PATHS, (
+        "The bare homepage path must be in CANDIDATE_INDEX_PATHS for fetch() to ever scan it"
+    )
+    print("PASS: homepage-embedded listings are found, and the bare homepage path is "
+          "confirmed present in CANDIDATE_INDEX_PATHS (the actual fix)")
+
+
 def test_listing_url_heuristic_real_world_confirmed_urls():
     """
     Regression test for a real bug found via live testing (June 2026):
@@ -164,5 +203,6 @@ if __name__ == "__main__":
     test_active_url_without_sold_segment_stays_active()
     test_missing_address_returns_none_not_garbage()
     test_looks_like_listing_url_heuristic()
+    test_collect_listing_urls_finds_homepage_embedded_listings()
     test_listing_url_heuristic_real_world_confirmed_urls()
     print("\nAll generic fallback adapter tests passed.")
