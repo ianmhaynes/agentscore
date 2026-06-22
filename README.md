@@ -151,11 +151,19 @@ important way, and `detect()` was fixed accordingly:
   confirmed homepage regardless of which downstream platform serves
   that office's actual listing pages.
 - **Practical effect**: `detect()` now matches broadly (any LJ Hooker
-  office), and `fetch()` determines real coverage per office — offices
-  whose search-results pages link out to `property.ljhooker.com.au`
-  listing pages will yield real data; offices that don't will correctly
-  return an empty list with a clear log reason, not a crash or
-  fabricated data.
+  office), and `fetch()` determines real coverage per office, trying
+  two paths in order:
+    1. **The office's own subdomain directly** —
+       `{domain}/search-results?searchProfile=buy&searchOrigin=office` —
+       confirmed as Pyrmont's actual real nav-link pattern, needing no
+       officeId at all. This is the primary path and should cover most
+       offices.
+    2. **An officeId-based national-domain URL** as a fallback, only
+       tried if the first path yields zero listing URLs — for any office
+       generation that scopes results that way instead.
+  Offices genuinely on the JS-loaded platform (with no listing data in
+  the plain HTML at all, on either path) correctly return an empty list
+  with a clear log reason, not a crash or fabricated data.
 
 **How office discovery works**: each office's `officeId` (needed to
 build the search-results URL) is auto-discovered from links on that

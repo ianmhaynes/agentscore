@@ -89,12 +89,15 @@ def test_active_listing_parsed_correctly():
     print("PASS: active listing parsed correctly")
 
 
-def test_full_fetch_with_office_id_discovery():
+def test_full_fetch_via_own_subdomain_no_office_id_needed():
+    """
+    CORRECTED after live testing: Pyrmont's real homepage links use
+    NO officeId at all — just "{domain}/search-results?searchProfile=
+    buy&searchOrigin=office". This is the primary path and should work
+    without ever needing to find an officeId.
+    """
     import scraper as scraper_module
 
-    fake_homepage = """
-    <a href="https://www.ljhooker.com.au/residential-search-results?officeId=1765&searchProfile=sold">Recent Sales</a>
-    """
     fake_buy_index = '<a href="https://property.ljhooker.com.au/residential-sydney-nsw-house-test123">x</a>'
     fake_sold_index = '<a href="https://property.ljhooker.com.au/residential-ultimo-nsw-apartment-a706-517-harris-street-shcgnz">x</a>'
 
@@ -107,15 +110,15 @@ def test_full_fetch_with_office_id_discovery():
         def __init__(self):
             self.headers = {}
         def get(self, url, timeout=None):
-            if "searchProfile=buy" in url:
+            if "searchProfile=buy" in url and "pyrmont.ljhooker.com.au" in url:
                 return FakeResponse(fake_buy_index)
-            elif "searchProfile=sold" in url:
+            elif "searchProfile=sold" in url and "pyrmont.ljhooker.com.au" in url:
                 return FakeResponse(fake_sold_index)
             elif "test123" in url:
                 return FakeResponse(FAKE_ACTIVE_DETAIL)
             elif "shcgnz" in url:
                 return FakeResponse(FAKE_SOLD_DETAIL)
-            return FakeResponse(fake_homepage)
+            return FakeResponse("", status_code=404)
 
     original_session = scraper_module.requests.Session
     scraper_module.requests.Session = FakeSession
@@ -123,26 +126,69 @@ def test_full_fetch_with_office_id_discovery():
         adapter = LJHookerAdapter()
         logs = []
         listings = adapter.fetch("https://pyrmont.ljhooker.com.au", logs.append)
-        assert len(listings) == 2
-        assert any("Found officeId=1765" in l for l in logs)
+        assert len(listings) == 2, f"Expected 2 listings via own-subdomain path, got {len(listings)}. Logs: {logs}"
+        assert not any("officeId fallback" in l for l in logs), "Should not need the fallback when own-subdomain path works"
         active = [l for l in listings if l.status == "Active"][0]
         sold = [l for l in listings if l.status == "Sold"][0]
         assert active.guide_price == "899000"
         assert sold.sold_price == "1670000"
-        print("PASS: full fetch() flow with officeId auto-discovery works end-to-end")
+        print("PASS: full fetch() works via own-subdomain search-results, no officeId required")
     finally:
         scraper_module.requests.Session = original_session
 
 
-def test_missing_office_id_returns_empty_gracefully():
-    """
-    Confirmed real-world case: detect() now matches BOTH known LJ Hooker
-    homepage shells (since both contain searchProfile= links), but only
-    offices whose own search-results pages actually expose a findable
-    officeId AND link out to property.ljhooker.com.au-style listing pages
-    will yield real data. An office on the JS-loaded platform (or any
-    homepage shape we haven't seen) should fail gracefully here, not crash.
-    """
+def test_full_fetch_falls_back_to_office_id_when_own_subdomain_empty():
+    """If an office's own subdomain search-results pages return no
+    listing URLs at all, fall back to trying the officeId-based
+    national-domain URL before giving up."""
+    import scraper as scraper_module
+
+    fake_homepage_with_office_id = (
+        '<a href="https://www.ljhooker.com.au/residential-search-results?officeId=1765&searchProfile=sold">Recent Sales</a>'
+    )
+    fake_national_sold_index = '<a href="https://property.ljhooker.com.au/residential-ultimo-nsw-apartment-a706-517-harris-street-shcgnz">x</a>'
+
+    class FakeResponse:
+        def __init__(self, text, status_code=200):
+            self.text = text
+            self.status_code = status_code
+
+    class FakeSession:
+        def __init__(self):
+            self.headers = {}
+        def get(self, url, timeout=None):
+            # Own-subdomain search-results returns no listing URLs at all
+            if "example.ljhooker.com.au/search-results" in url:
+                return FakeResponse("<html>no listings here</html>")
+            # Homepage fallback lookup reveals an officeId
+            elif url == "https://example.ljhooker.com.au":
+                return FakeResponse(fake_homepage_with_office_id)
+            # officeId-based national URL works
+            elif "officeId=1765" in url and "searchProfile=sold" in url:
+                return FakeResponse(fake_national_sold_index)
+            elif "officeId=1765" in url and "searchProfile=buy" in url:
+                return FakeResponse("<html>no active listings</html>")
+            elif "shcgnz" in url:
+                return FakeResponse(FAKE_SOLD_DETAIL)
+            return FakeResponse("", status_code=404)
+
+    original_session = scraper_module.requests.Session
+    scraper_module.requests.Session = FakeSession
+    try:
+        adapter = LJHookerAdapter()
+        logs = []
+        listings = adapter.fetch("https://example.ljhooker.com.au", logs.append)
+        assert len(listings) == 1, f"Expected 1 listing via officeId fallback, got {len(listings)}. Logs: {logs}"
+        assert any("Found officeId=1765" in l for l in logs)
+        assert listings[0].sold_price == "1670000"
+        print("PASS: falls back to officeId-based national URL when own-subdomain path yields nothing")
+    finally:
+        scraper_module.requests.Session = original_session
+
+
+def test_neither_path_works_returns_empty_gracefully():
+    """An office on the genuinely JS-loaded platform, with no officeId
+    discoverable anywhere either, should fail gracefully."""
     import scraper as scraper_module
 
     class FakeResponse:
@@ -150,21 +196,21 @@ def test_missing_office_id_returns_empty_gracefully():
             self.text = text
             self.status_code = status_code
 
-    class FakeSessionNoOfficeId:
+    class FakeSessionNothingWorks:
         def __init__(self):
             self.headers = {}
         def get(self, url, timeout=None):
-            return FakeResponse("<html>no officeId anywhere on this page</html>")
+            return FakeResponse("<html>no officeId, no listing links, nothing</html>")
 
     original_session = scraper_module.requests.Session
-    scraper_module.requests.Session = FakeSessionNoOfficeId
+    scraper_module.requests.Session = FakeSessionNothingWorks
     try:
         adapter = LJHookerAdapter()
         logs = []
         listings = adapter.fetch("https://example.ljhooker.com.au", logs.append)
-        assert listings == [], "Should return empty list, not crash, when officeId can't be found"
-        assert any("officeId" in l for l in logs)
-        print("PASS: missing officeId handled gracefully (real limitation for the JS-loaded-platform offices)")
+        assert listings == [], "Should return empty list, not crash, when neither path yields data"
+        assert any("not reachable via either known pattern" in l for l in logs)
+        print("PASS: neither-path-works case handled gracefully (genuinely unreachable JS-loaded office)")
     finally:
         scraper_module.requests.Session = original_session
 
@@ -174,6 +220,7 @@ if __name__ == "__main__":
     test_detect()
     test_sold_listing_parsed_correctly()
     test_active_listing_parsed_correctly()
-    test_full_fetch_with_office_id_discovery()
-    test_missing_office_id_returns_empty_gracefully()
+    test_full_fetch_via_own_subdomain_no_office_id_needed()
+    test_full_fetch_falls_back_to_office_id_when_own_subdomain_empty()
+    test_neither_path_works_returns_empty_gracefully()
     print("\nAll LJ Hooker adapter tests passed.")

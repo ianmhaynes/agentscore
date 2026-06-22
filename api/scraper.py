@@ -580,48 +580,76 @@ class LJHookerAdapter:
         session = requests.Session()
         session.headers.update({"User-Agent": USER_AGENT})
 
-        # officeId is office-specific and not derivable from the bare
-        # domain alone — search the homepage for a self-referencing
-        # search-results link that reveals this office's own officeId,
-        # the same way the user found it by inspecting their own site.
-        try:
-            resp = session.get(domain, timeout=REQUEST_TIMEOUT)
-        except requests.RequestException as e:
-            log(f"  ERROR fetching homepage: {e}")
-            return []
-
-        office_id_match = re.search(r"officeId=(\d+)", resp.text)
-        if not office_id_match:
-            log("  Could not find officeId on homepage — this office's site "
-                "structure may differ from the confirmed pattern")
-            return []
-        office_id = office_id_match.group(1)
-        log(f"  Found officeId={office_id}")
-
+        # CORRECTED after live testing: officeId is NOT universal across
+        # LJ Hooker offices. Confirmed via live fetch that Pyrmont's own
+        # nav links use no officeId at all — just
+        # "{domain}/search-results?searchProfile=buy&searchOrigin=office",
+        # relying on the subdomain itself to scope results. Broadbeach's
+        # FOOTER links happened to include an explicit officeId, but that
+        # appears to be a secondary/alternate path, not the primary one.
+        # Primary approach: hit the office's own subdomain directly, no
+        # ID needed. Fallback: look for an officeId anywhere on the
+        # homepage and use the national-domain URL, in case some office
+        # generations only expose listings that way.
         listing_urls = set()
+        used_fallback = False
+
         for label, profile in [("active", "buy"), ("sold", "sold")]:
-            search_url = (
-                f"https://www.ljhooker.com.au/residential-search-results"
-                f"?officeId={office_id}&orderBy=date-desc&searchProfile={profile}"
-            )
+            search_url = f"{domain}/search-results?searchProfile={profile}&orderBy=date-desc&searchOrigin=office"
             try:
                 resp = session.get(search_url, timeout=REQUEST_TIMEOUT)
             except requests.RequestException as e:
-                log(f"  ERROR fetching {label} index: {e}")
+                log(f"  ERROR fetching {label} index ({search_url}): {e}")
                 continue
             if resp.status_code != 200:
-                log(f"  {label} index returned HTTP {resp.status_code}")
+                log(f"  {label} index returned HTTP {resp.status_code} ({search_url})")
                 continue
             found = self._collect_listing_urls(resp.text, domain)
-            log(f"  {label} index: found {len(found)} listing URL(s)")
+            log(f"  {label} index (own subdomain): found {len(found)} listing URL(s)")
             listing_urls.update(found)
             time.sleep(0.5)
 
         if not listing_urls:
-            log("  No listing URLs found via search-results pages")
+            log("  No listings found via own-subdomain search-results pages — "
+                "trying officeId-based fallback...")
+            try:
+                resp = session.get(domain, timeout=REQUEST_TIMEOUT)
+                office_id_match = re.search(r"officeId=(\d+)", resp.text)
+            except requests.RequestException as e:
+                log(f"  ERROR fetching homepage for fallback: {e}")
+                office_id_match = None
+
+            if office_id_match:
+                office_id = office_id_match.group(1)
+                log(f"  Found officeId={office_id}, trying national-domain URLs")
+                used_fallback = True
+                for label, profile in [("active", "buy"), ("sold", "sold")]:
+                    search_url = (
+                        f"https://www.ljhooker.com.au/residential-search-results"
+                        f"?officeId={office_id}&orderBy=date-desc&searchProfile={profile}"
+                    )
+                    try:
+                        resp = session.get(search_url, timeout=REQUEST_TIMEOUT)
+                    except requests.RequestException as e:
+                        log(f"  ERROR fetching {label} index: {e}")
+                        continue
+                    if resp.status_code != 200:
+                        continue
+                    found = self._collect_listing_urls(resp.text, domain)
+                    log(f"  {label} index (officeId fallback): found {len(found)} listing URL(s)")
+                    listing_urls.update(found)
+                    time.sleep(0.5)
+            else:
+                log("  No officeId found either — this office's listings are not "
+                    "reachable via either known pattern (it may be on the "
+                    "JS-loaded platform with no server-rendered listing data)")
+
+        if not listing_urls:
+            log("  No listing URLs found via any known search-results pattern")
             return []
 
-        log(f"  Visiting {len(listing_urls)} listing page(s)...")
+        log(f"  Visiting {len(listing_urls)} listing page(s)"
+            f"{' (via officeId fallback)' if used_fallback else ''}...")
         listings = []
         for listing_url in listing_urls:
             try:
