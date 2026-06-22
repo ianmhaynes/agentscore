@@ -110,71 +110,69 @@ date_listed and days_on_market fields as unverified** — they may
 understate true time on market significantly. Ray White's dates are
 not affected by this question (confirmed reliable, structured data).
 
-## LJ Hooker Adapter (new, medium confidence) — and a national priority list
+## LJ Hooker Adapter (medium confidence, but currently no discovery path) — and a national priority list
 
-A fourth adapter, `LJHookerAdapter`, covers one of LJ Hooker's website
-platform generations. LJ Hooker is the **2nd-largest real estate
-franchise network in Australia by office count** (~600 offices,
-~6,000 people, per industry sources — Ray White is largest at ~700+
-offices/13,000 members, Harcourts ~300+ Australian offices, Raine &
-Horne ~300 offices). Given that scale, a real priority list emerged
-from checking franchise-size data rather than testing networks at
-random:
+A fourth adapter, `LJHookerAdapter`, can correctly parse individual LJ
+Hooker listing pages — but **cannot currently discover an office's full
+listing set automatically**, a real, confirmed limitation explained
+below. LJ Hooker is the **2nd-largest real estate franchise network in
+Australia by office count** (~600 offices, ~6,000 people, per industry
+sources — Ray White is largest at ~700+ offices/13,000 members,
+Harcourts ~300+ Australian offices, Raine & Horne ~300 offices). Given
+that scale, a real priority list emerged from checking franchise-size
+data rather than testing networks at random:
 
 1. **Ray White** (~700+ offices) — covered, `RayWhiteDynamicsAdapter`
-2. **LJ Hooker** (~600 offices) — partially covered, see below
+2. **LJ Hooker** (~600 offices) — listing pages parseable, discovery unsolved
 3. **Harcourts** (~300+ AU offices) — covered, `CloudhiRexAdapter`
 4. **McGrath / Belle Property** — Belle covered via the generic
    fallback adapter (low confidence); McGrath untested
 5. **Raine & Horne** (~300 offices) — untested
 
-**LJ Hooker's real architecture — corrected after a live testing bug:**
+**The full, confirmed picture, after exhausting every standard
+discovery option:**
 
-The first version of this adapter assumed two competely separate,
-unrelated LJ Hooker website platforms. Live testing against
-`pyrmont.ljhooker.com.au` revealed that assumption was wrong in an
-important way, and `detect()` was fixed accordingly:
+- **Individual listing pages are genuinely scrapable** —
+  `property.ljhooker.com.au/...` pages are server-rendered with
+  Schema.org markup (`itemprop="identifier"` gives status+price in one
+  field) and confirmed Google-indexed (hundreds of real examples found).
+  `LJHookerAdapter._parse_detail_page()` correctly extracts address,
+  status, price, agent name, and phone from a real page (confirmed:
+  A706/517 Harris Street, Ultimo NSW, sold $1,670,000, agent John Zheng).
+- **Every office homepage is the same HubSpot marketing shell**
+  (confirmed at both Broadbeach, QLD and Pyrmont, NSW) — `detect()`
+  matches on the `searchProfile=` URL pattern present there, not on
+  listing-page-only schema (an earlier version of this adapter had that
+  backwards and matched nothing; fixed).
+- **The search-results index page is ALSO JS-loaded** — confirmed via
+  live fetch of Pyrmont's own `/search-results?searchProfile=buy`: raw
+  HTML contains only literal "listing item" placeholders, zero real
+  links. This was not expected — individual listing pages being
+  server-rendered did not predict the index page would not be.
+- **No working sitemap exists** — `/robots.txt` lists
+  `Sitemap: https://property.ljhooker.com.au/sitemap_custom.xml`, but
+  that URL 404s. The standard default locations, `/sitemap.xml` and
+  `/sitemap_index.xml`, also both 404. Checked directly via `curl`,
+  June 2026 — not a parsing error, the files genuinely aren't there.
+- **An officeId-based fallback exists in `fetch()`** for a theoretical
+  alternate URL scheme, but is unconfirmed against any real office —
+  it's there in case a future office turns out to need it, not a proven
+  second path.
 
-- **Every LJ Hooker office homepage** (confirmed at both Broadbeach and
-  Pyrmont) runs the same HubSpot-powered marketing shell, and its
-  listing data is genuinely absent from the plain HTML — loaded via
-  client-side JavaScript this scraper can't execute.
-- **Individual listing pages** live on a separate, shared domain,
-  `property.ljhooker.com.au`, with confirmed Schema.org structured
-  markup (`itemprop="identifier"` etc.) — this part of the original
-  finding was correct.
-- The bug: `detect()` originally checked for that listing-page-only
-  schema markup, which will **never** appear on a homepage — so the
-  adapter failed to match any real office at all, falling through to
-  the generic fallback adapter instead. Fixed to check for the
-  `searchProfile=` URL pattern instead, which IS present on every
-  confirmed homepage regardless of which downstream platform serves
-  that office's actual listing pages.
-- **Practical effect**: `detect()` now matches broadly (any LJ Hooker
-  office), and `fetch()` determines real coverage per office, trying
-  two paths in order:
-    1. **The office's own subdomain directly** —
-       `{domain}/search-results?searchProfile=buy&searchOrigin=office` —
-       confirmed as Pyrmont's actual real nav-link pattern, needing no
-       officeId at all. This is the primary path and should cover most
-       offices.
-    2. **An officeId-based national-domain URL** as a fallback, only
-       tried if the first path yields zero listing URLs — for any office
-       generation that scopes results that way instead.
-  Offices genuinely on the JS-loaded platform (with no listing data in
-  the plain HTML at all, on either path) correctly return an empty list
-  with a clear log reason, not a crash or fabricated data.
+**Practical consequence**: `fetch()` returns an empty list with a clear
+log explanation for every real LJ Hooker office tested so far. This
+adapter currently has no way to find listing URLs on its own — it's
+correct-but-unreachable, the next problem to solve being discovery, not
+parsing. A possible future direction: accept individual listing URLs as
+direct input (bypassing index discovery entirely), since a person can
+trivially find and paste those from LJ Hooker's own site search, the
+same way Domain/Google indexing already does for these specific pages.
 
-**How office discovery works**: each office's `officeId` (needed to
-build the search-results URL) is auto-discovered from links on that
-office's own homepage — the same thing a person would find by clicking
-"Recent Sales" in the footer and reading the URL. There's no known way
-to enumerate every LJ Hooker office's ID without visiting each office's
-own site first.
-
-See `scraper.py`'s `LJHookerAdapter` class and `test_ljhooker_adapter.py`
-for full detail, including a test confirming the HubSpot-platform case
-fails gracefully rather than silently.
+See `scraper.py`'s `LJHookerAdapter` class (full detail in the class
+docstring) and `test_ljhooker_adapter.py` for the test suite, including
+cases confirming both the own-subdomain and officeId-fallback paths
+behave correctly, and that a genuinely unreachable office fails
+gracefully rather than crashing or fabricating data.
 
 ## Generic Fallback Adapter (low confidence)
 

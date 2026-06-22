@@ -413,10 +413,10 @@ class CloudhiRexAdapter:
 
 class LJHookerAdapter:
     """
-    Adapter for one of LJ Hooker's website platform generations — the one
-    serving individual listing pages from property.ljhooker.com.au with
-    Schema.org structured markup, confirmed via live DevTools inspection
-    of a real Pyrmont (NSW) listing (June 2026):
+    Adapter for individual LJ Hooker listing pages served from
+    property.ljhooker.com.au, with Schema.org structured markup,
+    confirmed via live DevTools inspection AND a direct fetch of a real
+    Pyrmont (NSW) listing (June 2026):
 
         <section class="property-overview container--section"
                  itemscope itemtype="https://schema.org/IndividualProduct">
@@ -429,27 +429,44 @@ class LJHookerAdapter:
     The single itemprop="identifier" field gives BOTH status and price in
     one confirmed string ("Sold For $X" / "For Sale $X" or similar) — more
     reliable than the separate URL-path or decoy-tag-avoidance tricks the
-    other adapters needed.
+    other adapters needed. Individual listing pages are confirmed
+    server-rendered and Google-indexed (hundreds of real examples found
+    via a site: search) — genuinely scrapable, no JS execution needed.
 
-    IMPORTANT — LJ Hooker runs MULTIPLE distinct website platforms across
-    its national network. A separate office (Broadbeach, QLD) was
-    confirmed via live inspection to run a different, HubSpot-powered
-    site (broadbeach.ljhooker.com.au) where listing data loads via
-    client-side JavaScript and is NOT present in the plain HTML response
-    at all — that platform is NOT covered by this adapter, and detecting
-    it would require a real browser, which this project does not use.
-    This adapter only covers offices on the property.ljhooker.com.au-style
-    platform. Real, but partial, coverage — same as every adapter in this
-    file covers what it covers and nothing more.
+    CONFIRMED, REAL LIMITATION — discovering an office's full listing
+    set is NOT currently solved, after exhausting every standard option:
 
-    Listing index pages use an explicit, unambiguous query parameter
-    (more reliable than Belle's URL-path convention or a text label):
-        ljhooker.com.au/residential-search-results?officeId={id}&searchProfile=sold
-        ljhooker.com.au/residential-search-results?officeId={id}&searchProfile=buy
-    officeId must be discovered from a specific office's own site (it
-    appears in that office's own internal links, e.g. footer "View Our
-    Recent Sales" link) — there is no known way to enumerate all LJ Hooker
-    office IDs without visiting each office's site individually first.
+      1. Every LJ Hooker office homepage (Broadbeach AND Pyrmont alike,
+         both confirmed via live fetch) is a HubSpot-powered marketing
+         shell. detect() matches on this shell's searchProfile= links.
+      2. The "own subdomain" search-results page
+         ({domain}/search-results?searchProfile=buy&searchOrigin=office)
+         that those links point to is ALSO confirmed JS-loaded — its raw
+         HTML contains only literal "listing item" placeholders, no real
+         addresses/prices/links, on Pyrmont specifically (confirmed via
+         live fetch, June 2026), despite individual listing pages on a
+         DIFFERENT domain being fully server-rendered.
+      3. An officeId-based fallback to a national-domain search-results
+         URL was tried (see fetch() below) on the theory that some
+         office generations might expose results differently — this
+         is unconfirmed to work for any real office; it's a fallback
+         for a theoretical case, not a proven second path.
+      4. /robots.txt was checked and DOES list a Sitemap directive
+         (https://property.ljhooker.com.au/sitemap_custom.xml) — but
+         that exact URL returns a 404. /sitemap.xml and
+         /sitemap_index.xml (the standard default locations) also both
+         return 404. No working sitemap exists at any checked location.
+
+    PRACTICAL CONSEQUENCE: this adapter can correctly parse a LJ Hooker
+    listing page IF you already have its URL, but currently has NO
+    reliable way to discover the full set of an office's listing URLs
+    automatically. fetch() will return an empty list with a clear log
+    explanation for essentially every real office tested so far — this
+    is an honest, confirmed gap, not a guess, and not silently hidden.
+    Until a discovery method is found, this adapter exists mainly to
+    correctly parse individual listing pages if/when they're fed in
+    directly (e.g. via a future "single listing URL" input mode, or if
+    a working discovery method is found later).
     """
 
     name = "lj_hooker"
