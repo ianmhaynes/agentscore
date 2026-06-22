@@ -737,11 +737,25 @@ class GenericFallbackAdapter:
     def _looks_like_listing_url(self, url, domain):
         if not url.startswith(domain):
             return False
-        # crude heuristic: a property URL is usually a deep path with
-        # several hyphenated words (an address) — short paths are more
-        # likely to be nav links, not listings
         path = url[len(domain):]
-        return path.count("-") >= 2 and len(path) > 20
+
+        # Confirmed via live inspection of 5+ real sites in one session
+        # (June 2026): a genuine listing URL consistently ends in a
+        # numeric ID (Viridity: ...-westmead-nsw-6194909, Crystal Realty:
+        # .../terrace/8654822, JBRE: ...-barr-street-camperdown-nsw-
+        # 6195868, Wiseberry: .../listing/16-adrian-close-...-36368).
+        # This signal alone is reliable across genuinely different URL
+        # styles (hyphenated-address style vs slash-separated-category
+        # style) — confirmed by testing both. An earlier version also
+        # required >=2 hyphens in the path, which wrongly rejected
+        # Crystal Realty's URL (only 1 hyphen, in "inner-west") since
+        # that site uses slashes rather than hyphens to separate path
+        # segments. Dropped that requirement; the numeric-ID check does
+        # the real work. A short minimum length still guards against
+        # matching a tiny, clearly-not-a-listing path that happens to
+        # end in a short number.
+        ends_in_numeric_id = bool(re.search(r"[-/]\d{4,}/?$", path))
+        return ends_in_numeric_id and len(path) > 15
 
     def _collect_listing_urls(self, html, domain):
         urls = set()

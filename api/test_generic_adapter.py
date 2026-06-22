@@ -118,6 +118,44 @@ def test_looks_like_listing_url_heuristic():
     print("PASS: listing-URL heuristic distinguishes real listings from nav links and other domains")
 
 
+def test_listing_url_heuristic_real_world_confirmed_urls():
+    """
+    Regression test for a real bug found via live testing (June 2026):
+    the original heuristic (hyphen count >= 2 AND length > 20) wrongly
+    ACCEPTED nav/category pages like "/upcoming-inspections-for-sale"
+    and "/recently-sold-page-2" on viridityre.com.au, while the real
+    listing URL never even made it into the candidate set because nav
+    pages crowded it out. Fixed to require a trailing numeric ID
+    instead, confirmed to work across multiple genuinely different real
+    URL styles (hyphenated-address style AND slash-separated-category
+    style, which an earlier fix attempt incorrectly rejected for
+    Crystal Realty specifically).
+    """
+    adapter = GenericFallbackAdapter()
+
+    real_urls = [
+        ("https://viridityre.com.au/76-3-reid-avenue-westmead-nsw-6194909", "https://viridityre.com.au"),
+        ("https://www.crystalrealty.com.au/sale/nsw/inner-west/newtown/residential/terrace/8654822", "https://www.crystalrealty.com.au"),
+        ("https://www.jbreproperty.com.au/803-30-barr-street-camperdown-nsw-6195868", "https://www.jbreproperty.com.au"),
+        ("https://www.wiseberry.com.au/listing/16-adrian-close-bateau-bay-nsw-2261-36368", "https://www.wiseberry.com.au"),
+        ("https://www.parkproperties.com.au/sale/nsw/inner-west/erskineville/residential/apartment/8661195", "https://www.parkproperties.com.au"),
+    ]
+    for url, dom in real_urls:
+        assert adapter._looks_like_listing_url(url, dom), f"FAIL: should accept real listing URL {url}"
+
+    fake_nav_pages = [
+        ("https://viridityre.com.au/upcoming-inspections-for-sale", "https://viridityre.com.au"),
+        ("https://viridityre.com.au/recently-sold-page-2", "https://viridityre.com.au"),
+        ("https://viridityre.com.au/buy", "https://viridityre.com.au"),
+        ("https://viridityre.com.au/about-us", "https://viridityre.com.au"),
+    ]
+    for url, dom in fake_nav_pages:
+        assert not adapter._looks_like_listing_url(url, dom), f"FAIL: should reject nav/category page {url}"
+
+    print("PASS: heuristic correctly accepts 5 real confirmed listing URLs across 2 different "
+          "URL styles, and rejects 4 real nav/category pages that previously caused a live bug")
+
+
 if __name__ == "__main__":
     test_adapter_order_generic_is_last()
     test_detect_always_true()
@@ -126,4 +164,5 @@ if __name__ == "__main__":
     test_active_url_without_sold_segment_stays_active()
     test_missing_address_returns_none_not_garbage()
     test_looks_like_listing_url_heuristic()
+    test_listing_url_heuristic_real_world_confirmed_urls()
     print("\nAll generic fallback adapter tests passed.")
