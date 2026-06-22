@@ -37,36 +37,51 @@ downloaded as CSV or Excel.
        (`agent-name`, `agent-office`) and a bare-`<h3>`-with-no-class
        match for price, all verified against real raw HTTP responses.
 
-## Discover Offices (new)
+## Discover Offices
 
-A new panel lets you type a suburb/postcode (e.g. "Mermaid Waters QLD
-4218") and find every real estate agency active there, across all
-franchises — not just Ray White/Harcourts. This works by:
+A panel lets you type a suburb/postcode (e.g. "Mermaid Waters QLD 4218")
+and find every real estate agency active there, across all franchises —
+not just Ray White/Harcourts.
 
-1. Reading Domain.com.au's public agency directory for that suburb
-   (paginated, often 8+ pages, 100+ agencies for a Gold Coast suburb).
-2. Visiting each agency's individual Domain profile page to extract
-   their own website URL.
-3. Feeding those website URLs into the existing scrape pipeline — same
-   adapters, same detect-first logic, same "No known platform detected"
-   fallback for anything that isn't Ray White or Harcourts/Cloudhi.
+**This went through two real iterations, worth recording honestly:**
 
-**⚠️ NOT YET CONFIRMED LIVE.** Unlike every adapter in `scraper.py`
-(each verified against real live HTTP responses before shipping), this
-discovery module's ability to reach Domain.com.au via plain HTTP
-requests has not been tested against the real site — only against
-fixtures built from content fetched through a different tool (which may
-have different bot-detection behaviour than a bare `requests.get()`
-call running on Vercel). Domain blocked early attempts in this
-project's history with a 403. The module is built defensively — every
-failure logs the real HTTP status rather than failing silently — so a
-live run will tell us definitively. If Domain blocks this in
-production, the practical fallback is the original manual process:
-find office URLs yourself and paste them into the existing URL box.
+1. **First attempt: Domain.com.au's agency directory.** Built, tested
+   against fixtures, deployed — then confirmed live with a real HTTP
+   403. Domain blocks this exact request in production, the same
+   Akamai-style bot detection that affected this project from its very
+   first session. Genuine dead end for a plain HTTP approach; not a bug
+   to fix, a wall to route around.
+2. **Current approach: Google Places API.** Uses Google's sanctioned,
+   paid API instead of scraping a site that actively blocks it:
+   - **Text Search** (`POST .../v1/places:searchText`) finds every
+     `real_estate_agency`-type place matching "real estate agencies in
+     {area}".
+   - **Place Details** (`GET .../v1/places/{place_id}`, field mask
+     `websiteUri`) looks up each agency's actual website.
+   - Those websites feed into the existing scrape pipeline exactly like
+     a manually-typed office URL — same adapters, same detect-first
+     logic, same "No known platform detected" fallback for anything
+     that isn't Ray White or Harcourts/Cloudhi.
+
+Requires the user's own Google Cloud Platform API key with Places API
+("New") enabled, entered in the UI (sent to this app's server per-request
+only, never stored). Roughly $0.003 per agency looked up via Place
+Details' "Contact" tier, plus one Text Search call per area.
+
+**⚠️ NOT YET CONFIRMED LIVE WITH A REAL KEY.** The request/response shape
+is confirmed correct against Google's own current API documentation, and
+a real test query (via a different tool, not this codebase) returned
+correct live agency data for this exact use case — but the full
+pipeline (Text Search → Place Details → website → feed into scraper)
+has not yet been run end-to-end against the real Google Places API from
+this app with a real API key. Known limitations:
+  - Text Search returns up to 20 results per page; this module does not
+    yet implement pagination beyond page 1, so large areas (Mermaid
+    Waters had 110+ agencies via Domain) will be undercounted.
+  - No retry/backoff logic for rate limits.
 
 See `discovery.py` for the implementation and `test_discovery.py` for
-tests, including one that specifically covers the "Domain returns 403"
-scenario gracefully.
+tests, including missing-key and partial-failure scenarios.
 
 Calculated client-side (in `calculate_days_on_market()`) from
 `date_listed` to `sold_date` for sold listings, or to today's date for

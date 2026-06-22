@@ -33,15 +33,18 @@ def index():
 def discover():
     data = request.get_json(force=True)
     area = data.get("area", "").strip()
+    api_key = data.get("apiKey", "").strip()
     if not area:
         return jsonify({"error": "No suburb/postcode provided"}), 400
+    if not api_key:
+        return jsonify({"error": "No Google Places API key provided"}), 400
 
     log_lines = []
 
     def log(msg):
         log_lines.append(msg)
 
-    agencies = discover_agencies(area, log=log)
+    agencies = discover_agencies(area, api_key=api_key, log=log)
     return jsonify({"agencies": agencies, "log": log_lines})
 
 

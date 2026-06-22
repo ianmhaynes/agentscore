@@ -1,139 +1,148 @@
-"""Tests for discovery.py — Domain.com.au agency discovery."""
+"""Tests for discovery.py — Google Places API office discovery."""
 import sys
 sys.path.insert(0, ".")
-from discovery import (
-    _extract_agency_cards, _extract_total_pages,
-    _extract_agency_website, _slugify_suburb_postcode,
-)
+import discovery as discovery_module
 
 
-def test_slugify():
-    assert _slugify_suburb_postcode("Mermaid Waters QLD 4218") == "mermaid-waters-qld-4218"
-    assert _slugify_suburb_postcode("mermaid-waters-qld-4218") == "mermaid-waters-qld-4218"
-    print("PASS: slugify handles both human and slug input forms")
+def test_no_api_key_returns_empty_gracefully():
+    logs = []
+    result = discovery_module.discover_agencies("Mermaid Waters QLD 4218", api_key=None, log=logs.append)
+    assert result == []
+    assert any("No Google Places API key" in l for l in logs)
+    print("PASS: missing API key handled gracefully, no crash")
 
 
-def test_extract_agency_cards():
-    html = """
-    <a href="/real-estate-agencies/kollosche-31985/">View Kollosche's profile</a>
-    <a href="/real-estate-agencies/raywhitemermaidwaters-34455/">View Ray White Mermaid Waters's profile</a>
+def test_full_flow_with_mock():
     """
-    cards = _extract_agency_cards(html)
-    assert len(cards) == 2
-    assert cards[0]["name"] == "Kollosche"
-    assert "raywhitemermaidwaters-34455" in cards[1]["domain_profile_url"]
-    print("PASS: agency cards extracted with correct name and URL")
-
-
-def test_extract_agency_cards_deduplicates():
-    html = """
-    <a href="/real-estate-agencies/kollosche-31985/">View Kollosche's profile</a>
-    <a href="/real-estate-agencies/kollosche-31985/">View Kollosche's profile</a>
+    Fixtures shaped from Google's documented Places API (New) response
+    structure for Text Search and Place Details, confirmed via official
+    docs (developers.google.com/maps/documentation/places/web-service).
     """
-    cards = _extract_agency_cards(html)
-    assert len(cards) == 1, "Duplicate agency links should be deduplicated"
-    print("PASS: duplicate agency cards are deduplicated")
-
-
-def test_extract_total_pages():
-    html = '<a href="?page=2">2</a><a href="?page=8">8</a>'
-    assert _extract_total_pages(html) == 8
-    assert _extract_total_pages("<html>no pagination here</html>") == 1
-    print("PASS: pagination max-page detection works, defaults to 1 if absent")
-
-
-def test_extract_agency_website():
-    html = '<a href="http://www.raywhitemermaidwaters.com.au">link</a>'
-    assert _extract_agency_website(html) == "http://www.raywhitemermaidwaters.com.au"
-    print("PASS: agency website extracted from confirmed link pattern")
-
-
-def test_extract_agency_website_returns_none_when_absent():
-    html = "<html><body>no external links here</body></html>"
-    assert _extract_agency_website(html) is None
-    print("PASS: returns None gracefully when no website link present (not a crash)")
-
-
-def test_discover_agencies_full_flow_with_mock():
-    import discovery as discovery_module
-
     class FakeResponse:
-        def __init__(self, text, status_code=200):
-            self.text = text
+        def __init__(self, json_data, status_code=200, text=""):
+            self._json = json_data
             self.status_code = status_code
+            self.text = text or str(json_data)
+        def json(self):
+            return self._json
 
-    page1 = """
-    <a href="/real-estate-agencies/raywhitemermaidwaters-34455/">View Ray White Mermaid Waters's profile</a>
-    <a href="?page=2">2</a>
-    """
-    page2 = '<a href="/real-estate-agencies/kollosche-31985/">View Kollosche\'s profile</a>'
-    rw_profile = '<a href="http://www.raywhitemermaidwaters.com.au">link</a>'
-    kollosche_profile = "<html>no website here</html>"
+    text_search_response = {
+        "places": [
+            {
+                "displayName": {"text": "Ray White Mermaid Waters"},
+                "id": "ChIJYySQY2AFkWsRDtx1TApHN0M",
+                "formattedAddress": "14/90 Markeri St, Mermaid Waters QLD 4218",
+            },
+            {
+                "displayName": {"text": "Harcourts Property Hub"},
+                "id": "ChIJabc123",
+                "formattedAddress": "Robina QLD 4226",
+            },
+        ]
+    }
+    place_details_responses = {
+        "ChIJYySQY2AFkWsRDtx1TApHN0M": {"websiteUri": "https://raywhitemermaidwaters.com.au/"},
+        "ChIJabc123": {"websiteUri": "https://propertyhub.harcourts.com.au/"},
+    }
 
-    class FakeSession:
-        def __init__(self):
-            self.headers = {}
-        def get(self, url, timeout=None):
-            if "page=2" in url:
-                return FakeResponse(page2)
-            elif "raywhitemermaidwaters-34455" in url:
-                return FakeResponse(rw_profile)
-            elif "kollosche-31985" in url:
-                return FakeResponse(kollosche_profile)
-            elif "real-estate-agencies/mermaid" in url:
-                return FakeResponse(page1)
-            return FakeResponse("", status_code=404)
+    def fake_post(url, json=None, headers=None, timeout=None):
+        assert "searchText" in url
+        assert headers["X-Goog-Api-Key"] == "fake-key-123"
+        return FakeResponse(text_search_response)
 
-    original_session = discovery_module.requests.Session
-    discovery_module.requests.Session = FakeSession
+    def fake_get(url, headers=None, timeout=None):
+        place_id = url.split("/")[-1]
+        return FakeResponse(place_details_responses.get(place_id, {}))
+
+    original_post, original_get = discovery_module.requests.post, discovery_module.requests.get
+    discovery_module.requests.post = fake_post
+    discovery_module.requests.get = fake_get
     try:
         logs = []
-        result = discovery_module.discover_agencies("Mermaid Waters QLD 4218", log=logs.append)
+        result = discovery_module.discover_agencies(
+            "Mermaid Waters QLD 4218", api_key="fake-key-123", log=logs.append
+        )
         assert len(result) == 2
         rw = next(a for a in result if a["name"] == "Ray White Mermaid Waters")
-        assert rw["website"] == "http://www.raywhitemermaidwaters.com.au"
-        kol = next(a for a in result if a["name"] == "Kollosche")
-        assert kol["website"] is None
-        print("PASS: full discover_agencies flow works end-to-end with pagination")
+        hc = next(a for a in result if a["name"] == "Harcourts Property Hub")
+        assert rw["website"] == "https://raywhitemermaidwaters.com.au/"
+        assert hc["website"] == "https://propertyhub.harcourts.com.au/"
+        print("PASS: full discover_agencies flow works with confirmed Places API response shape")
     finally:
-        discovery_module.requests.Session = original_session
+        discovery_module.requests.post = original_post
+        discovery_module.requests.get = original_get
 
 
-def test_discover_agencies_handles_blocked_directory():
-    """If Domain blocks the directory page itself (e.g. 403), should
-    return an empty list and log clearly, not crash."""
-    import discovery as discovery_module
-
+def test_text_search_failure_returns_empty_gracefully():
     class FakeResponse:
-        def __init__(self, status_code):
-            self.text = ""
+        def __init__(self, status_code, text="error"):
             self.status_code = status_code
+            self.text = text
+        def json(self):
+            return {}
 
-    class FakeBlockedSession:
-        def __init__(self):
-            self.headers = {}
-        def get(self, url, timeout=None):
-            return FakeResponse(403)
+    def fake_post(url, json=None, headers=None, timeout=None):
+        return FakeResponse(403, "API key not authorized")
 
-    original_session = discovery_module.requests.Session
-    discovery_module.requests.Session = FakeBlockedSession
+    original_post = discovery_module.requests.post
+    discovery_module.requests.post = fake_post
     try:
         logs = []
-        result = discovery_module.discover_agencies("Mermaid Waters QLD 4218", log=logs.append)
-        assert result == [], "Should return empty list, not crash, when directory page is blocked"
+        result = discovery_module.discover_agencies("Mermaid Waters QLD 4218", api_key="bad-key", log=logs.append)
+        assert result == []
         assert any("403" in l for l in logs), "Should log the real HTTP status for diagnosis"
-        print("PASS: gracefully handles a blocked/403 directory page without crashing")
+        print("PASS: Text Search failure (e.g. bad API key) handled gracefully")
     finally:
-        discovery_module.requests.Session = original_session
+        discovery_module.requests.post = original_post
+
+
+def test_place_details_failure_for_one_agency_does_not_break_others():
+    class FakeTextResponse:
+        def __init__(self):
+            self.status_code = 200
+            self.text = ""
+        def json(self):
+            return {"places": [
+                {"displayName": {"text": "Agency A"}, "id": "place_a"},
+                {"displayName": {"text": "Agency B"}, "id": "place_b"},
+            ]}
+
+    class FakeDetailsResponse:
+        def __init__(self, status_code, website=None):
+            self.status_code = status_code
+            self.text = ""
+            self._website = website
+        def json(self):
+            return {"websiteUri": self._website} if self._website else {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        return FakeTextResponse()
+
+    def fake_get(url, headers=None, timeout=None):
+        if "place_a" in url:
+            return FakeDetailsResponse(500)  # this one fails
+        return FakeDetailsResponse(200, website="https://agencyb.example.com")
+
+    original_post, original_get = discovery_module.requests.post, discovery_module.requests.get
+    discovery_module.requests.post = fake_post
+    discovery_module.requests.get = fake_get
+    try:
+        logs = []
+        result = discovery_module.discover_agencies("Test Area", api_key="fake-key", log=logs.append)
+        assert len(result) == 2, "Both agencies should still appear in results"
+        agency_a = next(a for a in result if a["name"] == "Agency A")
+        agency_b = next(a for a in result if a["name"] == "Agency B")
+        assert agency_a["website"] is None, "Failed lookup should be None, not crash the whole run"
+        assert agency_b["website"] == "https://agencyb.example.com"
+        print("PASS: one agency's Place Details failure doesn't break the rest of the run")
+    finally:
+        discovery_module.requests.post = original_post
+        discovery_module.requests.get = original_get
 
 
 if __name__ == "__main__":
-    test_slugify()
-    test_extract_agency_cards()
-    test_extract_agency_cards_deduplicates()
-    test_extract_total_pages()
-    test_extract_agency_website()
-    test_extract_agency_website_returns_none_when_absent()
-    test_discover_agencies_full_flow_with_mock()
-    test_discover_agencies_handles_blocked_directory()
+    test_no_api_key_returns_empty_gracefully()
+    test_full_flow_with_mock()
+    test_text_search_failure_returns_empty_gracefully()
+    test_place_details_failure_for_one_agency_does_not_break_others()
     print("\nAll discovery tests passed.")

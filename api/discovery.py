@@ -1,160 +1,129 @@
 """
-Domain.com.au agency discovery.
+Office discovery via Google Places API.
 
-Finds every real estate agency operating in a given suburb/postcode via
-Domain's public agency directory, then visits each agency's individual
-Domain profile page to extract their real website URL — which can then
-be fed into scraper.py's existing adapters (Ray White Dynamics, Cloudhi)
-the same way a manually-typed office URL would be.
+REPLACES an earlier Domain.com.au-based approach that was built, tested,
+and deployed — then confirmed BLOCKED in production with a real HTTP 403
+(Akamai-style bot detection), the same issue that affected this project
+from its very first session. Rather than fight that block, this module
+uses Google's Places API instead: a paid, sanctioned API with no bot
+detection to defeat.
 
-IMPORTANT — NOT YET CONFIRMED LIVE:
-Unlike scraper.py's adapters (each verified against real live responses
-before shipping), this module's ability to reach Domain.com.au via plain
-HTTP has NOT been confirmed. Domain blocked early attempts in this
-project's history with a 403 (Akamai-style bot detection) when scraped
-directly for listing data. Whether the *agency directory* pages specifically
-are equally protected is unknown — they may be, since it's the same
-domain and likely the same protection layer. Built defensively: every
-failure is logged with the real HTTP status/error rather than failing
-silently, so a live run will tell us definitively rather than guessing.
-If this turns out to be blocked, the practical fallback is the same
-two-step manual process used earlier in this project: a person finds
-real office URLs themselves (search engine, looking at a known
-franchise's office list) and pastes them into the existing URL box.
+Two-step process, confirmed against Google's current documented API
+shape (Places API "New", June 2026):
+
+  1. Text Search: POST https://places.googleapis.com/v1/places:searchText
+     body {"textQuery": "real estate agencies in {area}"}
+     -> returns place name + place ID for each matching agency.
+
+  2. Place Details: GET https://places.googleapis.com/v1/places/{place_id}
+     header X-Goog-FieldMask: websiteUri
+     -> returns the agency's actual website, which can then be fed into
+     scraper.py's existing adapters exactly like a manually-typed URL.
+
+REQUIRES a Google Cloud Platform API key with the Places API (New)
+enabled. Pass it in as `api_key` — never hardcode a key in this file.
+
+NOT YET CONFIRMED LIVE — this exact pipeline has not been run against
+the real Google Places API from this codebase. The API shape is
+confirmed correct from Google's own documentation, and Anthropic's
+internal places_search tool returned real, correct agency data for
+this exact use case during development — but that tool does not expose
+the `website` field this module needs, so the full pipeline (Text
+Search -> Place Details -> website) has only been verified in pieces,
+not end-to-end against the live API with a real key.
 """
 
-import re
 import time
-from urllib.parse import urlparse
 import requests
 
-USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
 REQUEST_TIMEOUT = 20
-DOMAIN_BASE = "https://www.domain.com.au"
+PLACES_API_BASE = "https://places.googleapis.com/v1/places"
+
+# Pricing note (per Google's published SKUs, June 2026): Text Search is
+# billed per request; Place Details "Contact" tier (which includes
+# websiteUri) is billed separately, roughly $3 per 1000 lookups. A
+# 100-agency area discovery costs on the order of a few cents in Place
+# Details calls plus one Text Search call. Cheap, but not free — worth
+# being aware of for repeated/large-area runs.
 
 
-def _slugify_suburb_postcode(raw):
-    """Accepts forms like 'Mermaid Waters QLD 4218' or 'mermaid-waters-qld-4218'
-    and returns the URL slug Domain expects."""
-    raw = raw.strip().lower()
-    if re.match(r"^[a-z0-9\-]+$", raw):
-        return raw  # already slug-shaped
-    raw = re.sub(r"[^a-z0-9\s]", "", raw)
-    return re.sub(r"\s+", "-", raw.strip())
-
-
-def _extract_agency_cards(html):
+def discover_agencies(area, api_key, log=print, max_results=20):
     """
-    Pull agency name + Domain profile URL from a directory listing page.
-    Each agency card contains a link like:
-      <a href="/real-estate-agencies/{slug}-{id}/">View {Name}'s profile</a>
+    area: e.g. "Mermaid Waters QLD 4218" — fed directly into a Google
+    Places text query, so a normal human-readable suburb/postcode works.
+    api_key: caller's Google Places API key (Places API "New" must be
+    enabled on the associated Google Cloud project).
+    max_results: Google Text Search returns up to 20 results per page;
+    this module does not yet implement pagination beyond the first page
+    (see "Known limitations" below).
+
+    Returns a list of dicts: {name, place_id, website} — website may be
+    None if Place Details didn't return one for that agency.
     """
-    agencies = []
-    seen_urls = set()
-    for m in re.finditer(
-        r'href="(/real-estate-agencies/[a-z0-9\-]+-\d+/?)"[^>]*>\s*View\s+([^\']+?)\'s profile',
-        html, re.IGNORECASE,
-    ):
-        url = DOMAIN_BASE + m.group(1)
-        name = m.group(2).strip()
-        if url not in seen_urls:
-            seen_urls.add(url)
-            agencies.append({"name": name, "domain_profile_url": url})
-    return agencies
+    if not api_key:
+        log("ERROR: No Google Places API key provided.")
+        return []
 
+    log(f"Searching Google Places for real estate agencies in: {area}")
+    search_url = f"{PLACES_API_BASE}:searchText"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": "places.displayName,places.id,places.formattedAddress",
+    }
+    body = {"textQuery": f"real estate agencies in {area}"}
 
-def _extract_total_pages(html):
-    """Domain shows numbered pagination links like ?page=8 — find the max."""
-    pages = [int(m) for m in re.findall(r"\?page=(\d+)", html)]
-    return max(pages) if pages else 1
-
-
-def _extract_agency_website(html):
-    """
-    On an individual agency's Domain profile page, the real website is
-    linked near the agency logo/header — confirmed via live inspection
-    (June 2026) as a plain <a href="http://www...">link</a> immediately
-    preceding the agency name heading.
-    """
-    m = re.search(
-        r'<a href="(https?://(?!www\.domain\.com\.au)[^"]+)"[^>]*>\s*\[?\s*link',
-        html, re.IGNORECASE,
-    )
-    if m:
-        return m.group(1)
-    # Fallback: any external (non-domain.com.au) link near the top of the page
-    m2 = re.search(r'href="(https?://(?!.*domain\.com\.au)[^"]+)"', html)
-    return m2.group(1) if m2 else None
-
-
-def discover_agencies(suburb_postcode, log=print, max_pages=None):
-    """
-    suburb_postcode: e.g. "Mermaid Waters QLD 4218" or the slug form.
-    Returns a list of dicts: {name, domain_profile_url, website} —
-    website may be None if extraction failed for that agency.
-    """
-    slug = _slugify_suburb_postcode(suburb_postcode)
-    session = requests.Session()
-    session.headers.update({"User-Agent": USER_AGENT})
-
-    first_url = f"{DOMAIN_BASE}/real-estate-agencies/{slug}/"
-    log(f"Fetching directory page 1: {first_url}")
     try:
-        resp = session.get(first_url, timeout=REQUEST_TIMEOUT)
+        resp = requests.post(search_url, json=body, headers=headers, timeout=REQUEST_TIMEOUT)
     except requests.RequestException as e:
-        log(f"ERROR: could not reach Domain directory — {e}")
+        log(f"ERROR: Text Search request failed — {e}")
         return []
 
     if resp.status_code != 200:
-        log(f"ERROR: Domain directory returned HTTP {resp.status_code} "
-            f"(likely bot detection — see scraper_discovery.py module docstring)")
+        log(f"ERROR: Text Search returned HTTP {resp.status_code}: {resp.text[:300]}")
         return []
 
-    total_pages = _extract_total_pages(resp.text)
-    if max_pages:
-        total_pages = min(total_pages, max_pages)
-    log(f"  Found {total_pages} page(s) of agencies")
+    data = resp.json()
+    places = data.get("places", [])
+    log(f"  Found {len(places)} agencies (Google Text Search, page 1 only — "
+        f"see module docstring re: pagination)")
 
-    all_agencies = _extract_agency_cards(resp.text)
-    log(f"  Page 1: {len(all_agencies)} agencies")
-
-    for page_num in range(2, total_pages + 1):
-        url = f"{DOMAIN_BASE}/real-estate-agencies/{slug}/?page={page_num}"
-        try:
-            resp = session.get(url, timeout=REQUEST_TIMEOUT)
-        except requests.RequestException as e:
-            log(f"  Page {page_num}: ERROR fetching — {e}")
+    agencies = []
+    for p in places:
+        name = p.get("displayName", {}).get("text", "")
+        place_id = p.get("id", "")
+        if not place_id:
             continue
-        if resp.status_code != 200:
-            log(f"  Page {page_num}: HTTP {resp.status_code}, skipping")
-            continue
-        page_agencies = _extract_agency_cards(resp.text)
-        log(f"  Page {page_num}: {len(page_agencies)} agencies")
-        all_agencies.extend(page_agencies)
-        time.sleep(0.5)
+        agencies.append({"name": name, "place_id": place_id, "website": None})
 
-    log(f"Total agencies found: {len(all_agencies)}")
-    log("Visiting each agency's profile page to extract their website...")
+    log("Looking up each agency's website via Place Details...")
+    for i, agency in enumerate(agencies, start=1):
+        website = _fetch_website(agency["place_id"], api_key, log)
+        agency["website"] = website
+        status = website if website else "(no website on record)"
+        log(f"  [{i}/{len(agencies)}] {agency['name']}: {status}")
+        time.sleep(0.1)
 
-    for i, agency in enumerate(all_agencies, start=1):
-        try:
-            resp = session.get(agency["domain_profile_url"], timeout=REQUEST_TIMEOUT)
-            if resp.status_code == 200:
-                website = _extract_agency_website(resp.text)
-                agency["website"] = website
-                status = website if website else "(no website found on profile page)"
-            else:
-                agency["website"] = None
-                status = f"HTTP {resp.status_code}"
-        except requests.RequestException as e:
-            agency["website"] = None
-            status = f"ERROR: {e}"
-        log(f"  [{i}/{len(all_agencies)}] {agency['name']}: {status}")
-        time.sleep(0.3)
+    found = sum(1 for a in agencies if a.get("website"))
+    log(f"Done. {found} of {len(agencies)} agencies have a usable website URL.")
+    return agencies
 
-    found_websites = sum(1 for a in all_agencies if a.get("website"))
-    log(f"Done. {found_websites} of {len(all_agencies)} agencies have a usable website URL.")
-    return all_agencies
+
+def _fetch_website(place_id, api_key, log):
+    url = f"{PLACES_API_BASE}/{place_id}"
+    headers = {
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": "websiteUri",
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+    except requests.RequestException as e:
+        log(f"    ERROR fetching Place Details for {place_id}: {e}")
+        return None
+
+    if resp.status_code != 200:
+        log(f"    Place Details for {place_id} returned HTTP {resp.status_code}")
+        return None
+
+    data = resp.json()
+    return data.get("websiteUri")
