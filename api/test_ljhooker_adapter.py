@@ -42,10 +42,17 @@ def test_adapter_registered_before_generic_fallback():
 
 def test_detect():
     adapter = LJHookerAdapter()
-    assert adapter.detect("<html>property.ljhooker.com.au is mentioned here</html>")
-    assert adapter.detect('<html>ljhooker site with itemprop="identifier" present</html>')
+    # Confirmed via live fetch: BOTH known LJ Hooker homepage shells
+    # (HubSpot-powered, at Broadbeach and Pyrmont alike) contain the
+    # searchProfile= URL pattern in their nav links, even though their
+    # listing pages live on different downstream platforms. detect()
+    # intentionally matches broadly here — fetch() is what determines
+    # whether real listing data is actually extractable for a given office.
+    homepage_html = '<a href="https://x.ljhooker.com.au/search-results?searchProfile=buy">Buy</a>'
+    assert adapter.detect(homepage_html)
     assert not adapter.detect("<html>a totally unrelated real estate site</html>")
-    print("PASS: detect() correctly identifies this LJ Hooker platform variant")
+    print("PASS: detect() matches on the homepage-present searchProfile= pattern, "
+          "not listing-page-only schema markup (a real bug found via live testing)")
 
 
 def test_sold_listing_parsed_correctly():
@@ -128,6 +135,14 @@ def test_full_fetch_with_office_id_discovery():
 
 
 def test_missing_office_id_returns_empty_gracefully():
+    """
+    Confirmed real-world case: detect() now matches BOTH known LJ Hooker
+    homepage shells (since both contain searchProfile= links), but only
+    offices whose own search-results pages actually expose a findable
+    officeId AND link out to property.ljhooker.com.au-style listing pages
+    will yield real data. An office on the JS-loaded platform (or any
+    homepage shape we haven't seen) should fail gracefully here, not crash.
+    """
     import scraper as scraper_module
 
     class FakeResponse:
@@ -149,7 +164,7 @@ def test_missing_office_id_returns_empty_gracefully():
         listings = adapter.fetch("https://example.ljhooker.com.au", logs.append)
         assert listings == [], "Should return empty list, not crash, when officeId can't be found"
         assert any("officeId" in l for l in logs)
-        print("PASS: missing officeId handled gracefully (real limitation for the HubSpot-platform offices)")
+        print("PASS: missing officeId handled gracefully (real limitation for the JS-loaded-platform offices)")
     finally:
         scraper_module.requests.Session = original_session
 

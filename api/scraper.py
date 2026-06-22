@@ -455,14 +455,21 @@ class LJHookerAdapter:
     name = "lj_hooker"
 
     def detect(self, html):
-        # Distinguishing marker: this platform's pages reference
-        # property.ljhooker.com.au or carry the confirmed itemprop
-        # scaffolding; the other known LJ Hooker platform (HubSpot) does
-        # not have either of these markers in its raw HTML.
+        # IMPORTANT: detect() runs against the HOMEPAGE, which is a
+        # separate, HubSpot-powered marketing shell — confirmed via live
+        # fetch of pyrmont.ljhooker.com.au (meta-generator: HubSpot,
+        # listing data NOT present, same as the Broadbeach JS-loaded
+        # platform). The itemprop="identifier" schema markup this
+        # adapter relies on only exists on individual LISTING pages
+        # (property.ljhooker.com.au/...), never on the homepage itself —
+        # checking for it here was a real bug found via live testing.
+        # The one thing EVERY LJ Hooker office homepage reliably links to
+        # is its own search-results page via the searchProfile= query
+        # param (buy/sold/rent/leased) — confirmed present on both
+        # Broadbeach and Pyrmont homepages despite their listing data
+        # living on different platforms. This is what we actually check.
         lowered = html.lower()
-        return "property.ljhooker.com.au" in lowered or (
-            "ljhooker" in lowered and 'itemprop="identifier"' in lowered
-        )
+        return "ljhooker" in lowered and "searchprofile=" in lowered
 
     def _parse_price_and_status(self, status_price_text):
         """'Sold For $1,670,000' -> ('Sold', '1670000'). Also handles

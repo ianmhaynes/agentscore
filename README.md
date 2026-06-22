@@ -128,25 +128,34 @@ random:
    fallback adapter (low confidence); McGrath untested
 5. **Raine & Horne** (~300 offices) — untested
 
-**LJ Hooker runs at least TWO distinct website platforms across its
-network — a real, confirmed finding, not a guess:**
+**LJ Hooker's real architecture — corrected after a live testing bug:**
 
-- **Covered by `LJHookerAdapter`**: offices whose listing pages serve
-  from `property.ljhooker.com.au` with Schema.org structured markup
-  (`itemscope itemtype="https://schema.org/IndividualProduct"`). A
-  single confirmed field —
-  `<p itemprop="identifier">Sold For $1,670,000</p>` — gives both
-  status and price in one reliable string, more robust than the
-  decoy-tag-avoidance or URL-path tricks other adapters needed.
-  Confirmed live against a real Pyrmont, NSW listing via direct fetch.
-- **NOT covered**: offices on a separate, HubSpot-powered platform
-  (confirmed live at `broadbeach.ljhooker.com.au`) where listing data
-  loads via client-side JavaScript and is genuinely absent from the
-  plain HTML response — there's nothing for a non-browser scraper to
-  read at all on that platform without a real browser, which this
-  project doesn't use. `LJHookerAdapter.fetch()` will correctly return
-  an empty list (not a crash, not garbage data) for offices on this
-  platform, logging the specific reason (`officeId not found`).
+The first version of this adapter assumed two competely separate,
+unrelated LJ Hooker website platforms. Live testing against
+`pyrmont.ljhooker.com.au` revealed that assumption was wrong in an
+important way, and `detect()` was fixed accordingly:
+
+- **Every LJ Hooker office homepage** (confirmed at both Broadbeach and
+  Pyrmont) runs the same HubSpot-powered marketing shell, and its
+  listing data is genuinely absent from the plain HTML — loaded via
+  client-side JavaScript this scraper can't execute.
+- **Individual listing pages** live on a separate, shared domain,
+  `property.ljhooker.com.au`, with confirmed Schema.org structured
+  markup (`itemprop="identifier"` etc.) — this part of the original
+  finding was correct.
+- The bug: `detect()` originally checked for that listing-page-only
+  schema markup, which will **never** appear on a homepage — so the
+  adapter failed to match any real office at all, falling through to
+  the generic fallback adapter instead. Fixed to check for the
+  `searchProfile=` URL pattern instead, which IS present on every
+  confirmed homepage regardless of which downstream platform serves
+  that office's actual listing pages.
+- **Practical effect**: `detect()` now matches broadly (any LJ Hooker
+  office), and `fetch()` determines real coverage per office — offices
+  whose search-results pages link out to `property.ljhooker.com.au`
+  listing pages will yield real data; offices that don't will correctly
+  return an empty list with a clear log reason, not a crash or
+  fabricated data.
 
 **How office discovery works**: each office's `officeId` (needed to
 build the search-results URL) is auto-discovered from links on that
