@@ -110,6 +110,69 @@ date_listed and days_on_market fields as unverified** — they may
 understate true time on market significantly. Ray White's dates are
 not affected by this question (confirmed reliable, structured data).
 
+## Client-side scrape batching (confirmed needed — real timeout hit)
+
+**Confirmed via live testing (June 2026)**: scraping 20 offices in one
+`/api/scrape` call hit Vercel's function timeout —
+`Vercel Runtime Timeout Error: Task timed out after 300 seconds` — a
+real ceiling, not a guess. Each office can involve several sequential
+HTTP fetches (homepage detection, index pages, every individual listing
+page for the Cloudhi/LJ Hooker/generic-fallback adapters), so the time
+per office adds up fast across a long list.
+
+**Fix**: the frontend now splits a long office list into batches of 5
+and sends them to `/api/scrape` sequentially, waiting for each batch to
+finish before starting the next, accumulating results progressively
+(office results and the listings table update after every batch, not
+only at the very end). This keeps each individual request safely under
+the timeout. A batch that errors doesn't abort the whole run — the
+frontend logs the error and continues with the next batch.
+
+**This is explicitly a stopgap, not a real solution for national
+scale.** Tested at ~20 offices; genuinely untested above that. The
+underlying problem — wanting to scrape on the order of **35,000
+offices/agencies across Australia** — needs real background-job
+infrastructure (a job queue, a database tracking progress, a worker
+process decoupled from any single HTTP request/browser tab) to do
+properly. That's a real architecture rebuild, intentionally deferred:
+the agreed plan is to first prove the pipeline's value at a single
+city/region scale (tens of offices, which batching now supports) before
+investing in infrastructure for three-orders-of-magnitude more targets.
+
+## Decision: staying plain-HTTP only (no Playwright/browser rendering)
+
+JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style
+homepage shell) cannot be read by this project's plain-HTTP approach —
+not a bug, a structural limit: the listing data genuinely isn't sent by
+the server until a browser executes JavaScript that fetches it
+separately. This was considered and explicitly declined as something
+to fix right now:
+
+- **What it would take**: a real headless-browser service (e.g.
+  Browserless, running Playwright/Puppeteer) sitting in front of or
+  alongside the existing Vercel app, since Vercel's serverless Python
+  functions can't run a Chromium binary themselves.
+- **What it costs**: a genuine ongoing operating cost, not a one-time
+  fee — Browserless prices in "Units" (~30 seconds of browser time
+  each), starting around $25/month for light use, scaling up with
+  volume. Visiting hundreds of listings across many offices would mean
+  real, recurring spend that grows with usage, unlike the current
+  approach which is effectively free.
+- **How common the problem actually is**: genuinely recurring, not
+  rare, but not universal either. Confirmed JS-loaded: LJ Hooker's
+  index pages and the HubSpot-powered office homepage shell. Confirmed
+  server-rendered (no browser needed): Ray White, Harcourts/Cloudhi,
+  Belle Property, and LJ Hooker's own individual listing pages.
+  Australian agencies are fragmented across many different website
+  platforms (Agentpoint, HubSpot, and others) layered on top of
+  separate backend CRMs (Rex, Agentbox, VaultRE, Box+Dice, etc.) — which
+  website platform a given office happens to use, not which franchise
+  it belongs to, determines whether its pages are server-rendered.
+- **Decision (June 2026)**: not worth the ongoing cost right now.
+  Revisit if there's a specific, funded reason to unlock a particular
+  JS-loaded site (e.g. a client need driving real usage that would
+  justify the spend).
+
 ## LJ Hooker Adapter (medium confidence, but currently no discovery path) — and a national priority list
 
 A fourth adapter, `LJHookerAdapter`, can correctly parse individual LJ

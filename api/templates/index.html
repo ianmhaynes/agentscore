@@ -465,6 +465,15 @@ function fmtPrice(v) {
   return '$' + n.toLocaleString('en-AU');
 }
 
+// Chunk size chosen conservatively: each office can involve multiple
+// sequential HTTP fetches (homepage detect + index pages + every
+// individual listing page for Cloudhi/generic_fallback/lj_hooker
+// adapters), and a single /api/scrape call hit Vercel's 300-second
+// function timeout at 20 offices in real testing (June 2026). Batching
+// client-side, waiting for each chunk to finish before starting the
+// next, keeps each individual request safely under that ceiling.
+const SCRAPE_BATCH_SIZE = 5;
+
 async function runScrape() {
   const raw = document.getElementById('urls').value;
   const urls = raw.split('\n').map(s => s.trim()).filter(Boolean);
@@ -476,7 +485,6 @@ async function runScrape() {
   const btn = document.getElementById('scrapeBtn');
   btn.disabled = true;
   btn.textContent = 'Scraping…';
-  setStatus(`Checking ${urls.length} office${urls.length > 1 ? 's' : ''}…`);
 
   const logEl = document.getElementById('log');
   logEl.style.display = 'block';
@@ -486,33 +494,59 @@ async function runScrape() {
   document.getElementById('resultsHeader').style.display = 'none';
   document.getElementById('resultsArea').innerHTML = '';
 
-  try {
-    const resp = await fetch('/api/scrape', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urls })
-    });
-    const data = await resp.json();
-
-    if (data.error) {
-      setStatus('Error: ' + data.error);
-      btn.disabled = false;
-      btn.textContent = 'Scrape listings';
-      return;
-    }
-
-    logEl.textContent = (data.log || []).join('\n');
-
-    renderOfficeResults(data.office_results || []);
-    renderListings(data.listings || []);
-    lastListings = data.listings || [];
-
-    const okCount = (data.office_results || []).filter(o => o.success).length;
-    setStatus(`Done. ${okCount}/${(data.office_results||[]).length} office(s) scraped, ${lastListings.length} listing rows.`);
-
-  } catch (err) {
-    setStatus('Request failed: ' + err.message);
+  const batches = [];
+  for (let i = 0; i < urls.length; i += SCRAPE_BATCH_SIZE) {
+    batches.push(urls.slice(i, i + SCRAPE_BATCH_SIZE));
   }
+
+  const allListings = [];
+  const allOfficeResults = [];
+  const allLogLines = [];
+  let hadError = false;
+
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    setStatus(
+      `Batch ${i + 1}/${batches.length} (offices ${i * SCRAPE_BATCH_SIZE + 1}–${i * SCRAPE_BATCH_SIZE + batch.length} of ${urls.length})…`
+    );
+
+    try {
+      const resp = await fetch('/api/scrape', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: batch })
+      });
+      const data = await resp.json();
+
+      if (data.error) {
+        allLogLines.push(`--- Batch ${i + 1} error: ${data.error} ---`);
+        hadError = true;
+        continue; // keep going with remaining batches rather than aborting everything
+      }
+
+      allLogLines.push(`--- Batch ${i + 1}/${batches.length} (${batch.length} office(s)) ---`);
+      allLogLines.push(...(data.log || []));
+      allOfficeResults.push(...(data.office_results || []));
+      allListings.push(...(data.listings || []));
+
+      // Render progressively so results appear as batches complete,
+      // not only once everything is done
+      logEl.textContent = allLogLines.join('\n');
+      logEl.scrollTop = logEl.scrollHeight;
+      renderOfficeResults(allOfficeResults);
+      renderListings(allListings);
+      lastListings = allListings;
+
+    } catch (err) {
+      allLogLines.push(`--- Batch ${i + 1} request failed: ${err.message} ---`);
+      logEl.textContent = allLogLines.join('\n');
+      hadError = true;
+    }
+  }
+
+  const okCount = allOfficeResults.filter(o => o.success).length;
+  const statusPrefix = hadError ? 'Done with some errors.' : 'Done.';
+  setStatus(`${statusPrefix} ${okCount}/${allOfficeResults.length} office(s) scraped, ${allListings.length} listing rows.`);
 
   btn.disabled = false;
   btn.textContent = 'Scrape listings';
