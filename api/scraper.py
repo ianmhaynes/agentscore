@@ -1004,6 +1004,39 @@ def scrape_office(raw_url, log=print, llm_api_key=None):
     if isinstance(matched_adapter, GenericFallbackAdapter) and matched_adapter.llm_call_count:
         log(f"  (used LLM extraction tier {matched_adapter.llm_call_count} time(s) for this office)")
 
+    # Confirmed real case (Park Properties, June 2026): a bare domain
+    # (no "www.") can connect successfully (no exception, status 200)
+    # yet still serve content that yields ZERO matching listings, while
+    # "www.{domain}" works fully — a different failure shape than the
+    # DNS-resolution-failure case handled above (no error here at all,
+    # just silently empty results). Proactively retry with "www." if
+    # the first attempt found nothing, same one-shot-only guard against
+    # looping. Scoped to GenericFallbackAdapter specifically — Ray
+    # White/Cloudhi/LJ Hooker already have their own confirmed domain
+    # conventions and a genuine zero-listings result from them is more
+    # likely a real "nothing to find" than a www./non-www. quirk.
+    netloc = urlparse(domain).netloc
+    already_has_www = netloc.startswith("www.")
+    if not listings and not already_has_www and isinstance(matched_adapter, GenericFallbackAdapter):
+        www_domain = domain.replace("://", "://www.", 1)
+        log(f"  No listings found on {domain}, retrying with {www_domain} ...")
+        try:
+            www_resp = session.get(www_domain, timeout=REQUEST_TIMEOUT)
+            if www_resp.status_code == 200:
+                www_adapters = _build_adapters(llm_api_key=llm_api_key)
+                www_matched = None
+                for adapter in www_adapters:
+                    if adapter.detect(www_resp.text):
+                        www_matched = adapter
+                        break
+                if www_matched:
+                    www_listings = www_matched.fetch(www_domain, log)
+                    if www_listings:
+                        log(f"  Found {len(www_listings)} listing(s) via {www_domain}")
+                        return www_listings, None
+        except requests.RequestException as e:
+            log(f"  www. retry also failed: {e}")
+
     return listings, None
 
 

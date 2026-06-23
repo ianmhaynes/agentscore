@@ -443,6 +443,115 @@ def test_scrape_office_www_retry_does_not_loop_or_overreach():
         scraper_module.requests.Session = original_session2
 
 
+def test_scrape_office_retries_with_www_on_zero_listings():
+    """
+    Regression test for a real bug found via live testing (June 2026):
+    Park Properties' bare domain (no "www.") connects successfully
+    (status 200, no exception) but serves content that yields ZERO
+    matching listings via every candidate path, while
+    "www.parkproperties.com.au" works fully (41 real listings found).
+    Different failure shape from the DNS-resolution-failure case (no
+    error at all here — just silently empty results), so this needed
+    its own proactive retry: if GenericFallbackAdapter finds zero
+    listings on the bare domain, retry once with www. before giving up.
+    """
+    import scraper as scraper_module
+
+    class FakeResponse:
+        def __init__(self, text, status_code=200):
+            self.text = text
+            self.status_code = status_code
+
+    bare_domain_empty_html = "<html><body>some content, but no listing links match any known path</body></html>"
+    www_domain_html = """
+    <h4>20/12-14 Enmore Road, NEWTOWN</h4>
+    <div>$ 490,000</div>
+    <a href="https://www.parkproperties.com.au/sale/nsw/inner-west/erskineville/residential/apartment/8687159">listing</a>
+    """
+    www_listing_detail_html = """
+    <h4>110 Mill Hill Road, BONDI JUNCTION</h4>
+    <div>$ 1,200,000</div>
+    """
+
+    class FakeSession:
+        def __init__(self):
+            self.headers = {}
+        def get(self, url, timeout=None):
+            if url == "https://parkproperties.com.au":
+                return FakeResponse(bare_domain_empty_html)
+            elif url == "https://www.parkproperties.com.au":
+                return FakeResponse(www_domain_html)
+            elif "8687159" in url:
+                return FakeResponse(www_listing_detail_html)
+            return FakeResponse("", status_code=404)
+
+    original_session = scraper_module.requests.Session
+    scraper_module.requests.Session = FakeSession
+    try:
+        logs = []
+        listings, error = scraper_module.scrape_office("parkproperties.com.au", log=logs.append)
+        assert error is None
+        assert len(listings) > 0, "FAIL: should find listings via the proactive www. retry"
+        assert any("retrying with https://www.parkproperties.com.au" in l for l in logs)
+        print("PASS: bare domain with zero listings (but no connection error) correctly "
+              "retries with www. and finds real data")
+    finally:
+        scraper_module.requests.Session = original_session
+
+
+def test_zero_listings_www_retry_safety_guards():
+    """Two safety guards on the proactive zero-listings retry: (1) an
+    already-www. domain with zero listings does not retry again (no
+    loop); (2) precise adapters (Ray White, Cloudhi, LJ Hooker) with
+    genuinely zero listings should NOT trigger a www. retry — only
+    GenericFallbackAdapter, since the precise adapters already have
+    their own confirmed domain conventions."""
+    import scraper as scraper_module
+    from test_scraper import FAKE_ACTIVE_HTML
+
+    class FakeResponse:
+        def __init__(self, text, status_code=200):
+            self.text = text
+            self.status_code = status_code
+
+    class FakeAlreadyWWWSession:
+        def __init__(self):
+            self.headers = {}
+        def get(self, url, timeout=None):
+            return FakeResponse("<html><body>nothing matches</body></html>")
+
+    original_session = scraper_module.requests.Session
+    scraper_module.requests.Session = FakeAlreadyWWWSession
+    try:
+        logs = []
+        listings, error = scraper_module.scrape_office("www.somesite.com.au", log=logs.append)
+        assert len(listings) == 0
+        assert not any("retrying with" in l for l in logs), "Should NOT retry when already on www."
+        print("PASS: already-www. domain with zero listings does not loop")
+    finally:
+        scraper_module.requests.Session = original_session
+
+    class FakeRayWhiteEmptyFetchSession:
+        def __init__(self):
+            self.headers = {}
+        def get(self, url, timeout=None):
+            if "for-sale" in url or "sold" in url:
+                return FakeResponse('<html><body><script>window.INITIAL_STATE = {"listings":{"entities":{}}};</script></body></html>')
+            return FakeResponse(FAKE_ACTIVE_HTML)
+
+    original_session2 = scraper_module.requests.Session
+    scraper_module.requests.Session = FakeRayWhiteEmptyFetchSession
+    try:
+        logs = []
+        listings, error = scraper_module.scrape_office("raywhitesomewhere.com.au", log=logs.append)
+        assert not any("retrying with" in l for l in logs), (
+            "Should NOT retry www. for precise adapters like Ray White, even with zero listings"
+        )
+        print("PASS: precise adapters (Ray White) with zero listings do not trigger the www. retry")
+    finally:
+        scraper_module.requests.Session = original_session2
+
+
 def test_calculate_days_on_market():
     from scraper import calculate_days_on_market
     # Sold case: fixed start and end
@@ -469,5 +578,7 @@ if __name__ == "__main__":
     test_cloudhi_dates_and_days_on_market()
     test_scrape_office_retries_with_www_on_dns_failure()
     test_scrape_office_www_retry_does_not_loop_or_overreach()
+    test_scrape_office_retries_with_www_on_zero_listings()
+    test_zero_listings_www_retry_safety_guards()
     test_calculate_days_on_market()
     print("\nAll tests passed.")
