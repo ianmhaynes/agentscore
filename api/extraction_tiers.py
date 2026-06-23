@@ -279,6 +279,108 @@ def try_class_price_address(html, log=None):
     }
 
 
+def try_semibold_muted_pattern(html, log=None):
+    """
+    Tier 3e. Confirmed real pattern (Pilcher Residential, confirmed via
+    live DevTools inspection — June 2026):
+        <div class="semi-bold">Sold</div>
+        <div class="muted">$4,225,000</div>
+    Status and price are SEPARATE sibling elements (unlike every other
+    tier so far, which combines them in one string or field) — status
+    in a "semi-bold" class, price in a "muted" class, no explicit
+    address element confirmed alongside them at the time of inspection.
+    Address must come from elsewhere on the page (URL slug or a nearby
+    heading); this tier only confirms status+price, and the caller
+    should still try to find an address via other means.
+    """
+    status_match = re.search(r'<div[^>]*class="[^"]*\bsemi-bold\b[^"]*"[^>]*>([^<]+)</div>', html)
+    price_match = re.search(r'<div[^>]*class="[^"]*\bmuted\b[^"]*"[^>]*>([^<]+)</div>', html)
+    if not status_match or not price_match:
+        return None
+
+    status_text = status_match.group(1).strip().lower()
+    status = "Sold" if "sold" in status_text else "Active"
+    price = _parse_price(price_match.group(1))
+
+    # No confirmed dedicated address element for this pattern — fall
+    # back to the page's <h1> or <title>-style heading, same generic
+    # approach tier 3c uses, since address discovery wasn't the part of
+    # this site that needed a custom tier.
+    addr_match = re.search(r"<h1[^>]*>([^<]+)</h1>", html)
+    address = addr_match.group(1).strip() if addr_match else ""
+    if not address:
+        return None
+
+    if log:
+        log("    [tier 3e: semi-bold/muted pattern] matched")
+    return {
+        "address": address,
+        "suburb": "",
+        "postcode": "",
+        "price": price,
+        "status": status,
+        "tier": "semibold_muted_pattern",
+    }
+
+
+def try_renet_heading_pattern(html, log=None):
+    """
+    Tier 3f. Confirmed real pattern (Travers Gray Real Estate, platform:
+    ReNet — confirmed via "Marketing by ... and ReNet Real Estate
+    Software" footer credit — June 2026):
+        <h2>Camperdown</h2>
+        <h3>603/144 Mallett Street</h3>
+        ...
+        <h2>Sold for $555,000</h2>
+    Suburb and street address are SEPARATE headings (h2 then h3), and
+    status+price are combined in a second, later h2 — genuinely
+    different positioning from tier 3 (Viridity/JBRE's prop-title,
+    where both headings sit adjacent). Distinguished from tier 3 by
+    requiring the specific "Sold for $X" / "For sale" phrasing in an h2
+    that is NOT immediately followed by the address h3 (since that h2/h3
+    pair at the TOP of the page is the suburb/street, not status/price).
+    """
+    # Find the status+price heading specifically — must contain a $
+    # amount or explicit Sold/For Sale text, distinguishing it from the
+    # suburb-name heading at the top of the page which never has a $.
+    status_price_match = re.search(
+        r"<h2[^>]*>\s*((?:Sold|For [Ss]ale)[^<]*\$[\d,]+[^<]*|[^<]*\$[\d,]+[^<]*(?:Sold|[Ff]or [Ss]ale)[^<]*)</h2>",
+        html,
+    )
+    if not status_price_match:
+        return None
+
+    status_price_text = status_price_match.group(1).strip()
+    is_sold = "sold" in status_price_text.lower()
+    price = _parse_price(status_price_text)
+
+    # Address: confirmed shape is an <h2>{suburb}</h2><h3>{street}</h3>
+    # pair appearing BEFORE the status/price heading in the document.
+    before_status = html[:status_price_match.start()]
+    addr_pair_match = None
+    for m in re.finditer(r"<h2[^>]*>([^<]+)</h2>\s*<h3[^>]*>([^<]+)</h3>", before_status):
+        addr_pair_match = m  # keep the last one found before status/price
+    if not addr_pair_match:
+        return None
+
+    suburb = addr_pair_match.group(1).strip()
+    street = addr_pair_match.group(2).strip()
+    address = f"{street}, {suburb}" if street and suburb else (street or suburb)
+    if not address:
+        return None
+
+    if log:
+        log("    [tier 3f: ReNet heading pattern - suburb/street h2+h3, status+price h2] matched")
+    return {
+        "address": address,
+        "suburb": suburb,
+        "postcode": "",
+        "price": price,
+        "status": "Sold" if is_sold else "Active",
+        "tier": "renet_heading_pattern",
+    }
+
+
 def try_generic_dollar_scan(html, log=None):
     """
     Tier 3c. The original, fully generic last-resort: any element whose
@@ -363,7 +465,20 @@ def try_reapit_agentbox_pattern(html, log=None):
     # above found nothing, since the explicit label is more reliable
     # when present.
     status = ""
-    contract_match = re.search(r"Contract(?:<[^>]*>)*\s*([A-Za-z][A-Za-z ]*)", html)
+    # Confirmed real HTML structure via direct curl against the live
+    # site (June 2026): "Contract" sits inside a <label>, and the value
+    # sits in a SEPARATE sibling <div class="detail-value">, with a
+    # newline between the closing </label> and the opening <div> tag:
+    #   <label class="detail-label">Contract</label>
+    #   <div class="detail-value">Sold</div>
+    # A real bug was found and fixed here: the original regex's
+    # tag-skipping group, (?:<[^>]*>)*, only matched tags with NO
+    # whitespace between them, so it stopped at </label> and never
+    # reached the actual value in the next div — every "Contract" field
+    # silently failed to match on the real site despite working in every
+    # hand-written test fixture (which never included a newline between
+    # the tags). Fixed by allowing optional whitespace between each tag.
+    contract_match = re.search(r"Contract(?:\s*<[^>]*>\s*)*([A-Za-z][A-Za-z ]*)", html)
     if contract_match:
         contract_value = contract_match.group(1).strip().lower()
         if "sold" in contract_value:
@@ -494,6 +609,8 @@ def extract_listing_fields(html, listing_url, log=None, llm_api_key=None):
         try_known_shared_template,
         try_class_price_address,
         try_reapit_agentbox_pattern,
+        try_semibold_muted_pattern,
+        try_renet_heading_pattern,
         try_generic_dollar_scan,
     ):
         result = tier_fn(html, log=log)

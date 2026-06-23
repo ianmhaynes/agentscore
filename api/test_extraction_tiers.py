@@ -207,6 +207,115 @@ def test_tier3d_agentpoint_status_fallback():
           "fallback (and the offset bug that originally broke it)")
 
 
+def test_tier3e_semibold_muted_pattern():
+    """
+    Confirmed real pattern (Pilcher Residential, confirmed via live
+    DevTools inspection — June 2026): status in class="semi-bold",
+    price in a sibling class="muted" — separate elements, unlike every
+    combined-string tier built so far.
+    """
+    real_html = """
+    <html><body>
+    <h1>901/32 Maida Street Lilyfield</h1>
+    <div class="left flex-40">
+    <div class="semi-bold">Sold</div>
+    <div><div class="muted">$4,225,000</div></div>
+    </div>
+    </body></html>
+    """
+    result = et.try_semibold_muted_pattern(real_html)
+    assert result is not None
+    assert result["price"] == "4225000"
+    assert result["status"] == "Sold"
+    assert "Maida Street" in result["address"]
+    print("PASS: tier 3e (semi-bold/muted) correctly parses Pilcher's confirmed structure")
+
+
+def test_tier3f_renet_heading_pattern():
+    """
+    Confirmed real pattern (Travers Gray Real Estate, platform: ReNet,
+    confirmed via "Marketing by ... and ReNet Real Estate Software"
+    footer — June 2026): suburb and street address in SEPARATE h2/h3
+    headings, status+price combined in a later h2 ("Sold for $X").
+    """
+    real_sold_html = """
+    <html><body>
+    <h2>Camperdown</h2>
+    <h3>603/144 Mallett Street</h3>
+    <div>lots of description text here</div>
+    <h2>Sold for $555,000</h2>
+    </body></html>
+    """
+    result = et.try_renet_heading_pattern(real_sold_html)
+    assert result is not None
+    assert result["address"] == "603/144 Mallett Street, Camperdown"
+    assert result["suburb"] == "Camperdown"
+    assert result["price"] == "555000"
+    assert result["status"] == "Sold"
+
+    real_active_html = """
+    <html><body>
+    <h2>Erskineville</h2>
+    <h3>12 Test Street</h3>
+    <div>description</div>
+    <h2>For Sale $899,000</h2>
+    </body></html>
+    """
+    active_result = et.try_renet_heading_pattern(real_active_html)
+    assert active_result["status"] == "Active"
+    assert active_result["price"] == "899000"
+
+    print("PASS: tier 3f (ReNet heading pattern) correctly parses both sold and active "
+          "Travers Gray listings with separate suburb/street headings")
+
+
+def test_tier3d_contract_field_with_whitespace_between_tags():
+    """
+    Regression test for a real, subtle bug found via a direct curl
+    check against the LIVE Crystal Realty site (June 2026) — not
+    findable via any hand-written fixture, since every fixture in this
+    file happened to place tags with no whitespace between them. The
+    real production HTML has a newline between </label> and the
+    following <div>:
+        <label class="detail-label">Contract</label>
+        <div class="detail-value">Sold</div>
+    The original regex's tag-skipping group only matched directly-
+    adjacent tags with zero whitespace, so it silently stopped at
+    </label> and never reached the actual "Sold" value — every single
+    "Contract" field on the real site failed to match despite the
+    exact same logic working in every prior test fixture. This is why
+    the live deployed app returned status="Active" for confirmed-sold
+    listings even after the tier itself was "tested and passing."
+    """
+    real_html_exact_from_curl = (
+        '<div class="detail-value">Terrace</div>\n'
+        '</li>\n'
+        '<li>\n'
+        '<label class="detail-label">Contract</label>\n'
+        '<div class="detail-value">Sold</div>\n'
+        '</li>\n'
+    )
+    full_page = f"""
+    <html><body>
+    <h4>2B Hopetoun Street Petersham NSW</h4>
+    <div>$ 1,670,000</div>
+    <ul><li>
+    <label class="detail-label">Type</label>
+    {real_html_exact_from_curl}
+    </li></ul>
+    </body></html>
+    """
+    result = et.try_reapit_agentbox_pattern(full_page)
+    assert result is not None
+    assert result["status"] == "Sold", (
+        f"FAIL: {result['status']!r} — this is the exact real bug that shipped to "
+        f"production despite passing every prior test"
+    )
+    assert result["price"] == "1670000"
+    print("PASS: Contract field correctly matched even with whitespace/newlines between "
+          "tags (the exact real bug found via live curl, invisible to every prior fixture)")
+
+
 def test_tier3c_generic_scan():
     result = et.try_generic_dollar_scan(GENERIC_SCAN_HTML)
     assert result is not None
@@ -294,6 +403,9 @@ if __name__ == "__main__":
     test_tier3b_class_price_address()
     test_tier3d_reapit_agentbox_pattern()
     test_tier3d_agentpoint_status_fallback()
+    test_tier3e_semibold_muted_pattern()
+    test_tier3f_renet_heading_pattern()
+    test_tier3d_contract_field_with_whitespace_between_tags()
     test_tier3c_generic_scan()
     test_priority_order_json_ld_beats_everything()
     test_no_tier_matches_returns_none()

@@ -206,6 +206,31 @@ since changing the hostname wouldn't fix those.
 results returned only "about us" / testimonial content, no listing
 data).
 
+**A genuinely important bug found only via live production data, not
+any test fixture**: every Crystal Realty listing came back
+`status: "Active"` on the live deployed app, even for listings
+confirmed sold (e.g. 2B Hopetoun Street Petersham, explicitly
+`<label>Contract</label><div>Sold</div>` when inspected directly).
+Direct `curl` against the real page revealed the cause: the real HTML
+has a **newline between `</label>` and the following `<div>`**:
+```html
+<label class="detail-label">Contract</label>
+<div class="detail-value">Sold</div>
+```
+The Contract-field regex's tag-skipping group, `(?:<[^>]*>)*`, only
+matched directly-ADJACENT tags with zero whitespace between them — it
+silently stopped at `</label>` and never reached the actual value.
+Every hand-written test fixture in this project happened to place tags
+with no whitespace between them, so this bug was invisible to the
+entire test suite despite "passing" — it only surfaced once real
+production data was checked. Fixed by allowing optional whitespace
+between each skipped tag: `(?:\s*<[^>]*>\s*)*`. A new regression test
+uses the exact real HTML string captured via curl, specifically so this
+class of bug (real whitespace a fixture wouldn't naturally include)
+can't silently reappear. This is a genuine reminder that "the tests
+pass" and "this works on the real site" are not the same claim — see
+`test_tier3d_contract_field_with_whitespace_between_tags` for detail.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style
