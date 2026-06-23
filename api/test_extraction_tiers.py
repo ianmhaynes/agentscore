@@ -231,22 +231,32 @@ def test_tier3e_semibold_muted_pattern():
     print("PASS: tier 3e (semi-bold/muted) correctly parses Pilcher's confirmed structure")
 
 
-def test_tier3f_renet_heading_pattern():
+def test_tier3f_renet_hidden_input_pattern():
     """
     Confirmed real pattern (Travers Gray Real Estate, platform: ReNet,
     confirmed via "Marketing by ... and ReNet Real Estate Software"
-    footer — June 2026): suburb and street address in SEPARATE h2/h3
-    headings, status+price combined in a later h2 ("Sold for $X").
+    footer). CORRECTED June 23, 2026 — an earlier version of this tier
+    assumed a heading-pair structure (<h2>{suburb}</h2><h3>{street}</h3>)
+    based on a web_fetch markdown conversion that turned out to
+    misrepresent the real page. Direct curl against a live listing
+    (https://traversgray.com.au/21631808) confirmed NO such heading
+    exists anywhere in the raw HTML — the address was only ever present
+    as a combined string inside hidden form inputs:
+        <input type="hidden" name="extra_data[address]" value="603/144 Mallett Street, Camperdown" />
+        <input type="hidden" name="extra_data[price]" value="Sold for $555,000" />
+    This is the SAME hidden-input pattern first found on traversgray
+    months ago at the very start of this project — the heading-based
+    tier built earlier today was solving an already-solved problem with
+    a less reliable approach, based on an unverified assumption about
+    page structure. This test fixture is built directly from real grep
+    output against the live site, not a guess.
     """
     real_sold_html = """
-    <html><body>
-    <h2>Camperdown</h2>
-    <h3>603/144 Mallett Street</h3>
-    <div>lots of description text here</div>
-    <h2>Sold for $555,000</h2>
-    </body></html>
+    <input type="hidden" name="extra_data[address]" id="address" value="603/144 Mallett Street, Camperdown" />
+    <input type="hidden" name="extra_data[heading]" id="heading" value="UNDER OFFER!" />
+    <input type="hidden" name="extra_data[price]" id="price" value="Sold for $555,000" />
     """
-    result = et.try_renet_heading_pattern(real_sold_html)
+    result = et.try_renet_hidden_input_pattern(real_sold_html)
     assert result is not None
     assert result["address"] == "603/144 Mallett Street, Camperdown"
     assert result["suburb"] == "Camperdown"
@@ -254,19 +264,15 @@ def test_tier3f_renet_heading_pattern():
     assert result["status"] == "Sold"
 
     real_active_html = """
-    <html><body>
-    <h2>Erskineville</h2>
-    <h3>12 Test Street</h3>
-    <div>description</div>
-    <h2>For Sale $899,000</h2>
-    </body></html>
+    <input type="hidden" name="extra_data[address]" id="address" value="12 Test Street, Erskineville" />
+    <input type="hidden" name="extra_data[price]" id="price" value="For Sale $899,000" />
     """
-    active_result = et.try_renet_heading_pattern(real_active_html)
+    active_result = et.try_renet_hidden_input_pattern(real_active_html)
     assert active_result["status"] == "Active"
     assert active_result["price"] == "899000"
 
-    print("PASS: tier 3f (ReNet heading pattern) correctly parses both sold and active "
-          "Travers Gray listings with separate suburb/street headings")
+    print("PASS: tier 3f (ReNet hidden-input pattern) correctly parses both sold and active "
+          "Travers Gray listings — built from real confirmed raw HTML, not a markdown-derived guess")
 
 
 def test_tier3d_contract_field_with_whitespace_between_tags():
@@ -314,34 +320,6 @@ def test_tier3d_contract_field_with_whitespace_between_tags():
     assert result["price"] == "1670000"
     print("PASS: Contract field correctly matched even with whitespace/newlines between "
           "tags (the exact real bug found via live curl, invisible to every prior fixture)")
-
-
-def test_tier3f_handles_nested_tags_and_decoy_heading():
-    """
-    Regression test for a real bug found via direct fetch against a
-    live Travers Gray sold listing (June 2026) — the exact same class
-    of issue as Crystal Realty's Contract field. The real page wraps
-    the price in a nested <span> inside the "Sold for $X" <h2>, and ALSO
-    has a decoy <h3>SOLD AT AUCTION $X</h3> earlier on the page with a
-    DIFFERENT price than the real sold price. The original regex
-    required flat (no nested tags) content, silently failing against
-    the real page despite passing every prior fixture.
-    """
-    real_html_with_nested_span_and_decoy = """
-    <h2>Leichhardt</h2>
-    <h3>1/38-40 John Street</h3>
-    <h3>SOLD AT AUCTION $1,402,000</h3>
-    <h2>Sold for <span>$1,410,000</span></h2>
-    """
-    result = et.try_renet_heading_pattern(real_html_with_nested_span_and_decoy)
-    assert result is not None, "FAIL: should handle nested span inside the price heading"
-    assert result["price"] == "1410000", (
-        f"FAIL: got {result.get('price')!r} — likely matched the decoy h3 price instead"
-    )
-    assert result["status"] == "Sold"
-    assert result["address"] == "1/38-40 John Street, Leichhardt"
-    print("PASS: tier 3f correctly handles a nested <span> around the price and "
-          "ignores a decoy heading with a different price elsewhere on the page")
 
 
 def test_tier3c_generic_scan():
@@ -432,8 +410,7 @@ if __name__ == "__main__":
     test_tier3d_reapit_agentbox_pattern()
     test_tier3d_agentpoint_status_fallback()
     test_tier3e_semibold_muted_pattern()
-    test_tier3f_renet_heading_pattern()
-    test_tier3f_handles_nested_tags_and_decoy_heading()
+    test_tier3f_renet_hidden_input_pattern()
     test_tier3d_contract_field_with_whitespace_between_tags()
     test_tier3c_generic_scan()
     test_priority_order_json_ld_beats_everything()

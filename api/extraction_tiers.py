@@ -323,77 +323,69 @@ def try_semibold_muted_pattern(html, log=None):
     }
 
 
-def try_renet_heading_pattern(html, log=None):
+def try_renet_hidden_input_pattern(html, log=None):
     """
     Tier 3f. Confirmed real pattern (Travers Gray Real Estate, platform:
     ReNet — confirmed via "Marketing by ... and ReNet Real Estate
-    Software" footer credit — June 2026):
-        <h2>Camperdown</h2>
-        <h3>603/144 Mallett Street</h3>
-        ...
-        <h2>Sold for $555,000</h2>
-    Suburb and street address are SEPARATE headings (h2 then h3), and
-    status+price are combined in a second, later h2 — genuinely
-    different positioning from tier 3 (Viridity/JBRE's prop-title,
-    where both headings sit adjacent). Distinguished from tier 3 by
-    requiring the specific "Sold for $X" / "For sale" phrasing in an h2
-    that is NOT immediately followed by the address h3 (since that h2/h3
-    pair at the TOP of the page is the suburb/street, not status/price).
+    Software" footer credit). CORRECTED June 23, 2026 after a real bug:
+    an earlier version of this tier assumed a heading-pair structure
+    (<h2>{suburb}</h2><h3>{street}</h3>) based on a web_fetch markdown
+    conversion that turned out to misrepresent the real page — direct
+    curl against the live site confirmed NO such suburb heading exists
+    anywhere in the raw HTML. The real, reliable source of truth is a
+    set of hidden form input fields (confirmed via raw curl,
+    June 23, 2026):
+        <input type="hidden" name="extra_data[address]" value="603/144 Mallett Street, Camperdown" />
+        <input type="hidden" name="extra_data[heading]" value="UNDER OFFER!" />
+        <input type="hidden" name="extra_data[price]" value="Sold for $555,000" />
+    This is also the SAME hidden-input pattern first found on
+    traversgray months ago at the very start of this project (then
+    called the "decode '<input type=hidden name=extra_data[price]>'"
+    finding) — meaning earlier tier-building work re-derived a worse,
+    less reliable version of something already discovered. The address
+    field already comes as "{street}, {suburb}" combined — no need to
+    parse separate suburb/street headings at all.
     """
-    # Find the status+price heading specifically — must contain a $
-    # amount or explicit Sold/For Sale text, distinguishing it from the
-    # suburb-name heading at the top of the page which never has a $.
-    #
-    # CONFIRMED REAL BUG (found via direct fetch against a live Travers
-    # Gray sold listing, June 2026) — the exact same class of issue as
-    # Crystal Realty's Contract field: the original regex required the
-    # price text to be FLAT (no nested tags at all) inside the <h2>,
-    # via [^<]* groups. If the real page wraps any part of the heading
-    # in a nested tag (e.g. <h2>Sold for <span>$1,410,000</span></h2>),
-    # the match silently fails. Fixed to capture everything up to the
-    # closing </h2> (.*?, allowing nested tags) and strip tags out of
-    # the captured text afterward, rather than assuming flat content.
-    found_status_price = None
-    # Scan all h2 elements (not just the first) to find the one that
-    # actually contains a $ amount or explicit Sold/For Sale phrasing —
-    # the suburb-name h2 at the top of the page never has a $ in it.
-    for m in re.finditer(r"<h2[^>]*>(.*?)</h2>", html, re.DOTALL):
-        inner_text = re.sub(r"<[^>]+>", "", m.group(1))
-        inner_text = re.sub(r"\s+", " ", inner_text).strip()
-        if re.search(r"\$[\d,]+", inner_text) and re.search(r"sold|for sale", inner_text, re.IGNORECASE):
-            found_status_price = (m, inner_text)
-            break
-    if not found_status_price:
+    addr_match = re.search(
+        r'extra_data\[address\][^>]*value="([^"]+)"', html
+    )
+    if not addr_match:
         return None
-    status_price_match, status_price_text = found_status_price
-
-    is_sold = "sold" in status_price_text.lower()
-    price = _parse_price(status_price_text)
-
-    # Address: confirmed shape is an <h2>{suburb}</h2><h3>{street}</h3>
-    # pair appearing BEFORE the status/price heading in the document.
-    before_status = html[:status_price_match.start()]
-    addr_pair_match = None
-    for m in re.finditer(r"<h2[^>]*>([^<]+)</h2>\s*<h3[^>]*>([^<]+)</h3>", before_status):
-        addr_pair_match = m  # keep the last one found before status/price
-    if not addr_pair_match:
-        return None
-
-    suburb = addr_pair_match.group(1).strip()
-    street = addr_pair_match.group(2).strip()
-    address = f"{street}, {suburb}" if street and suburb else (street or suburb)
+    address = addr_match.group(1).strip()
     if not address:
         return None
 
+    suburb = ""
+    parts = [p.strip() for p in address.split(",")]
+    if len(parts) >= 2:
+        suburb = parts[-1]
+
+    price_match = re.search(
+        r'extra_data\[price\][^>]*value="([^"]+)"', html
+    )
+    status = ""
+    price = ""
+    if price_match:
+        price_text = price_match.group(1).strip()
+        is_sold = "sold" in price_text.lower()
+        status = "Sold" if is_sold else "Active"
+        price = _parse_price(price_text)
+    else:
+        # Some active listings show "Contact Agent" in the price field
+        # or omit it; fall back to the heading field for status only.
+        heading_match = re.search(r'extra_data\[heading\][^>]*value="([^"]+)"', html)
+        if heading_match and "sold" in heading_match.group(1).lower():
+            status = "Sold"
+
     if log:
-        log("    [tier 3f: ReNet heading pattern - suburb/street h2+h3, status+price h2] matched")
+        log("    [tier 3f: ReNet hidden-input pattern - extra_data[address/price]] matched")
     return {
         "address": address,
         "suburb": suburb,
         "postcode": "",
         "price": price,
-        "status": "Sold" if is_sold else "Active",
-        "tier": "renet_heading_pattern",
+        "status": status,
+        "tier": "renet_hidden_input_pattern",
     }
 
 
@@ -626,7 +618,7 @@ def extract_listing_fields(html, listing_url, log=None, llm_api_key=None):
         try_class_price_address,
         try_reapit_agentbox_pattern,
         try_semibold_muted_pattern,
-        try_renet_heading_pattern,
+        try_renet_hidden_input_pattern,
         try_generic_dollar_scan,
     ):
         result = tier_fn(html, log=log)
