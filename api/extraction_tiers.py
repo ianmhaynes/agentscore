@@ -343,14 +343,30 @@ def try_renet_heading_pattern(html, log=None):
     # Find the status+price heading specifically — must contain a $
     # amount or explicit Sold/For Sale text, distinguishing it from the
     # suburb-name heading at the top of the page which never has a $.
-    status_price_match = re.search(
-        r"<h2[^>]*>\s*((?:Sold|For [Ss]ale)[^<]*\$[\d,]+[^<]*|[^<]*\$[\d,]+[^<]*(?:Sold|[Ff]or [Ss]ale)[^<]*)</h2>",
-        html,
-    )
-    if not status_price_match:
+    #
+    # CONFIRMED REAL BUG (found via direct fetch against a live Travers
+    # Gray sold listing, June 2026) — the exact same class of issue as
+    # Crystal Realty's Contract field: the original regex required the
+    # price text to be FLAT (no nested tags at all) inside the <h2>,
+    # via [^<]* groups. If the real page wraps any part of the heading
+    # in a nested tag (e.g. <h2>Sold for <span>$1,410,000</span></h2>),
+    # the match silently fails. Fixed to capture everything up to the
+    # closing </h2> (.*?, allowing nested tags) and strip tags out of
+    # the captured text afterward, rather than assuming flat content.
+    found_status_price = None
+    # Scan all h2 elements (not just the first) to find the one that
+    # actually contains a $ amount or explicit Sold/For Sale phrasing —
+    # the suburb-name h2 at the top of the page never has a $ in it.
+    for m in re.finditer(r"<h2[^>]*>(.*?)</h2>", html, re.DOTALL):
+        inner_text = re.sub(r"<[^>]+>", "", m.group(1))
+        inner_text = re.sub(r"\s+", " ", inner_text).strip()
+        if re.search(r"\$[\d,]+", inner_text) and re.search(r"sold|for sale", inner_text, re.IGNORECASE):
+            found_status_price = (m, inner_text)
+            break
+    if not found_status_price:
         return None
+    status_price_match, status_price_text = found_status_price
 
-    status_price_text = status_price_match.group(1).strip()
     is_sold = "sold" in status_price_text.lower()
     price = _parse_price(status_price_text)
 

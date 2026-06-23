@@ -316,6 +316,34 @@ def test_tier3d_contract_field_with_whitespace_between_tags():
           "tags (the exact real bug found via live curl, invisible to every prior fixture)")
 
 
+def test_tier3f_handles_nested_tags_and_decoy_heading():
+    """
+    Regression test for a real bug found via direct fetch against a
+    live Travers Gray sold listing (June 2026) — the exact same class
+    of issue as Crystal Realty's Contract field. The real page wraps
+    the price in a nested <span> inside the "Sold for $X" <h2>, and ALSO
+    has a decoy <h3>SOLD AT AUCTION $X</h3> earlier on the page with a
+    DIFFERENT price than the real sold price. The original regex
+    required flat (no nested tags) content, silently failing against
+    the real page despite passing every prior fixture.
+    """
+    real_html_with_nested_span_and_decoy = """
+    <h2>Leichhardt</h2>
+    <h3>1/38-40 John Street</h3>
+    <h3>SOLD AT AUCTION $1,402,000</h3>
+    <h2>Sold for <span>$1,410,000</span></h2>
+    """
+    result = et.try_renet_heading_pattern(real_html_with_nested_span_and_decoy)
+    assert result is not None, "FAIL: should handle nested span inside the price heading"
+    assert result["price"] == "1410000", (
+        f"FAIL: got {result.get('price')!r} — likely matched the decoy h3 price instead"
+    )
+    assert result["status"] == "Sold"
+    assert result["address"] == "1/38-40 John Street, Leichhardt"
+    print("PASS: tier 3f correctly handles a nested <span> around the price and "
+          "ignores a decoy heading with a different price elsewhere on the page")
+
+
 def test_tier3c_generic_scan():
     result = et.try_generic_dollar_scan(GENERIC_SCAN_HTML)
     assert result is not None
@@ -405,6 +433,7 @@ if __name__ == "__main__":
     test_tier3d_agentpoint_status_fallback()
     test_tier3e_semibold_muted_pattern()
     test_tier3f_renet_heading_pattern()
+    test_tier3f_handles_nested_tags_and_decoy_heading()
     test_tier3d_contract_field_with_whitespace_between_tags()
     test_tier3c_generic_scan()
     test_priority_order_json_ld_beats_everything()
