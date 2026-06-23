@@ -322,6 +322,36 @@ def test_tier3d_contract_field_with_whitespace_between_tags():
           "tags (the exact real bug found via live curl, invisible to every prior fixture)")
 
 
+def test_tier3g_eagle_software_pattern():
+    """
+    Confirmed real pattern (Living Estate Agents, platform: Eagle
+    Software, confirmed via "Powered by Eagle Software" footer —
+    June 23, 2026): address combined in one <h1>, price alone in the
+    next <h2>. Confirmed real limitation: the DETAIL page itself never
+    shows "Sold"/"For Sale" text — that only appears on the recently-
+    sold INDEX page's card — so this tier intentionally returns an
+    empty status rather than guessing, and the listing URL itself
+    (a /property?property_id=... query string) never contains a
+    /sold/-style path segment either, so the caller's URL-path status
+    fallback also can't help here. Real, honest gap: every livingea
+    listing currently defaults to "Active" even when genuinely sold.
+    """
+    real_html = """
+    <html><body>
+    <h1>2 Chisholm Avenue, Clemton Park</h1>
+    <h2>$1,827,000</h2>
+    </body></html>
+    """
+    result = et.try_eagle_software_pattern(real_html)
+    assert result is not None
+    assert result["address"] == "2 Chisholm Avenue, Clemton Park"
+    assert result["suburb"] == "Clemton Park"
+    assert result["price"] == "1827000"
+    assert result["status"] == "", "Status should be intentionally empty, not guessed"
+    print("PASS: tier 3g (Eagle Software h1/h2) correctly extracts address+price, "
+          "intentionally leaves status for the caller (a real, documented limitation)")
+
+
 def test_tier3c_generic_scan():
     result = et.try_generic_dollar_scan(GENERIC_SCAN_HTML)
     assert result is not None
@@ -411,6 +441,7 @@ if __name__ == "__main__":
     test_tier3d_agentpoint_status_fallback()
     test_tier3e_semibold_muted_pattern()
     test_tier3f_renet_hidden_input_pattern()
+    test_tier3g_eagle_software_pattern()
     test_tier3d_contract_field_with_whitespace_between_tags()
     test_tier3c_generic_scan()
     test_priority_order_json_ld_beats_everything()

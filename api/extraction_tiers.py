@@ -389,6 +389,50 @@ def try_renet_hidden_input_pattern(html, log=None):
     }
 
 
+def try_eagle_software_pattern(html, log=None):
+    """
+    Tier 3g. Confirmed real pattern (Living Estate Agents, platform:
+    Eagle Software — confirmed via "Powered by Eagle Software" footer
+    credit, June 23, 2026):
+        <h1>2 Chisholm Avenue, Clemton Park</h1>
+        <h2>$1,827,000</h2>
+    Address combined as one h1 ("street, suburb"), price alone in the
+    next h2 — no "Sold"/"For Sale" text on the DETAIL page itself
+    (confirmed: that status text only appears on the INDEX page's
+    listing card, e.g. "Sold! $1,827,000", not on the individual
+    listing page). Status must come from elsewhere — the caller falls
+    back to the URL-path /sold-style check, same as Belle Property,
+    since this tier intentionally does not guess a status itself.
+    """
+    addr_match = re.search(r"<h1[^>]*>([^<]+)</h1>", html)
+    if not addr_match:
+        return None
+    address = addr_match.group(1).strip()
+    if not address:
+        return None
+
+    price_match = re.search(r"<h2[^>]*>([^<]+)</h2>", html)
+    price = ""
+    if price_match:
+        price = _parse_price(price_match.group(1))
+
+    suburb = ""
+    parts = [p.strip() for p in address.split(",")]
+    if len(parts) >= 2:
+        suburb = parts[-1]
+
+    if log:
+        log("    [tier 3g: Eagle Software pattern - h1 address, h2 price] matched")
+    return {
+        "address": address,
+        "suburb": suburb,
+        "postcode": "",
+        "price": price,
+        "status": "",  # intentionally not guessed; caller falls back to URL-path check
+        "tier": "eagle_software_pattern",
+    }
+
+
 def try_generic_dollar_scan(html, log=None):
     """
     Tier 3c. The original, fully generic last-resort: any element whose
@@ -619,6 +663,7 @@ def extract_listing_fields(html, listing_url, log=None, llm_api_key=None):
         try_reapit_agentbox_pattern,
         try_semibold_muted_pattern,
         try_renet_hidden_input_pattern,
+        try_eagle_software_pattern,
         try_generic_dollar_scan,
     ):
         result = tier_fn(html, log=log)

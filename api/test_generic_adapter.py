@@ -203,6 +203,22 @@ def test_collect_listing_urls_handles_relative_hrefs():
           "real listings found and nav links correctly excluded")
 
 
+def test_eagle_software_property_id_url_pattern():
+    """
+    Confirmed real exception (Living Estate Agents, platform: Eagle
+    Software — June 23, 2026): listing URLs use a query-string ID, not
+    a trailing numeric ID — e.g.
+    "/property?property_id=1662525/2-chisholm-avenue-clemton-park".
+    """
+    adapter = GenericFallbackAdapter()
+    domain = "https://www.livingea.com.au"
+    real_url = "https://www.livingea.com.au/property?property_id=1662525/2-chisholm-avenue-clemton-park"
+    assert adapter._looks_like_listing_url(real_url, domain), (
+        "FAIL: should accept the confirmed real Eagle Software property_id URL pattern"
+    )
+    print("PASS: Eagle Software's property_id query-string URL pattern is correctly accepted")
+
+
 def test_protocol_relative_urls_resolved_without_doubling():
     """
     Regression test for THE real bug behind a multi-hour debugging
@@ -352,6 +368,7 @@ if __name__ == "__main__":
     test_looks_like_listing_url_heuristic()
     test_collect_listing_urls_finds_homepage_embedded_listings()
     test_collect_listing_urls_handles_relative_hrefs()
+    test_eagle_software_property_id_url_pattern()
     test_protocol_relative_urls_resolved_without_doubling()
     test_other_real_url_styles_unaffected_by_protocol_relative_fix()
     test_listing_url_heuristic_accepts_bare_numeric_id_urls()

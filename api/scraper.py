@@ -795,6 +795,18 @@ class GenericFallbackAdapter:
         # "/about", "/sold" never end in 4+ digits), so the extra length
         # guard was redundant protection that became actively harmful
         # once a real site with short listing URLs was found.
+        #
+        # Confirmed exception (Living Estate Agents, platform: Eagle
+        # Software, confirmed via "Powered by Eagle Software" footer —
+        # June 2026): listing URLs use a query-string ID, NOT a
+        # trailing numeric ID — e.g.
+        # "/property?property_id=1662525/2-chisholm-avenue-clemton-park".
+        # The numeric ID sits right after "property_id=", not at the
+        # end of the path (a slug follows it). Checked as an explicit,
+        # separate pattern rather than trying to generalize the
+        # trailing-numeric-ID rule further.
+        if re.search(r"property_id=\d{4,}", path):
+            return True
         return bool(re.search(r"[-/]\d{4,}/?$", path))
 
     def _collect_listing_urls(self, html, domain):
