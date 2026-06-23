@@ -757,9 +757,20 @@ class GenericFallbackAdapter:
         return True
 
     def _looks_like_listing_url(self, url, domain):
-        if not url.startswith(domain):
+        # CONFIRMED REAL BUG (June 23, 2026): a strict url.startswith(
+        # domain) check rejected every one of Travers Gray's listing
+        # links, because its protocol-relative hrefs
+        # (e.g. "//www.traversgray.com.au/21534560") always resolve to
+        # the www. variant, while `domain` is often the bare,
+        # non-www. version the user originally typed in (before any
+        # www.-retry logic runs). www. and non-www. are the same real
+        # site; normalize both sides before comparing so this doesn't
+        # silently reject every listing on a site that mixes the two.
+        normalized_url = re.sub(r"^https?://(www\.)?", "", url)
+        normalized_domain = re.sub(r"^https?://(www\.)?", "", domain)
+        if not normalized_url.startswith(normalized_domain):
             return False
-        path = url[len(domain):]
+        path = normalized_url[len(normalized_domain):]
 
         # Confirmed via live inspection of 5+ real sites in one session
         # (June 2026): a genuine listing URL consistently ends in a
@@ -788,11 +799,30 @@ class GenericFallbackAdapter:
 
     def _collect_listing_urls(self, html, domain):
         urls = set()
+        # CONFIRMED REAL BUG (June 23, 2026): Travers Gray Real Estate's
+        # actual hrefs are PROTOCOL-RELATIVE URLs — e.g.
+        # href="//www.traversgray.com.au/21534560" (no "https:" prefix,
+        # just "//"). Neither the absolute-URL branch (requires
+        # https?://) nor the original root-relative branch handled this
+        # correctly — the root-relative regex matched the LEADING "/"
+        # of "//www.traversgray..." as if it were a domain-relative path
+        # starting with "/www.traversgray...", then prepended our own
+        # domain again, producing a doubled URL like
+        # "https://traversgray.com.au//traversgray.com.au/21534560" —
+        # which silently 404'd every single time, hidden by the
+        # absence of status-code logging (also fixed this session).
+        # This MUST be checked first, before the root-relative branch,
+        # since "//host/path" also matches a naive "starts with /" test.
+        scheme = domain.split("://")[0]  # "https" or "http"
+        for m in re.finditer(r'href="(//[^"\s]+)"', html):
+            url = f"{scheme}:{m.group(1)}"
+            if self._looks_like_listing_url(url, domain):
+                urls.add(url)
         for m in re.finditer(r'href="(https?://[^"\s]+)"', html):
             url = m.group(1)
             if self._looks_like_listing_url(url, domain):
                 urls.add(url)
-        for m in re.finditer(r'href="(/[^"\s]+)"', html):
+        for m in re.finditer(r'href="(/(?!/)[^"\s]+)"', html):
             url = domain + m.group(1)
             if self._looks_like_listing_url(url, domain):
                 urls.add(url)

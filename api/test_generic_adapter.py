@@ -203,6 +203,107 @@ def test_collect_listing_urls_handles_relative_hrefs():
           "real listings found and nav links correctly excluded")
 
 
+def test_protocol_relative_urls_resolved_without_doubling():
+    """
+    Regression test for THE real bug behind a multi-hour debugging
+    session on traversgray.com.au (June 23, 2026). Confirmed via direct
+    curl that Travers Gray's real listing hrefs are PROTOCOL-RELATIVE
+    URLs: href="//www.traversgray.com.au/21534560" (no "https:" prefix).
+    Two compounding bugs were found:
+      1. Neither the absolute-URL nor original root-relative regex
+         handled "//host/path" correctly — the root-relative branch
+         matched the leading "/" and re-prepended our own domain,
+         producing a doubled URL like
+         "https://traversgray.com.au//traversgray.com.au/21534560",
+         which silently 404'd on every single listing, every time,
+         hidden by the absence of status-code logging (also fixed this
+         session in scraper.py's fetch() loop).
+      2. Even after adding explicit protocol-relative handling, the
+         resolved URL (www.traversgray.com.au) didn't match the
+         original bare domain (traversgray.com.au) the user typed in,
+         because _looks_like_listing_url() did a strict prefix check
+         with no www. normalization — so EVERY found URL was then
+         rejected by the heuristic, a second bug masking the first.
+    """
+    adapter = GenericFallbackAdapter()
+    domain = "https://traversgray.com.au"
+
+    html = '<a href="//www.traversgray.com.au/21534560">listing</a>'
+    found = adapter._collect_listing_urls(html, domain)
+    assert len(found) == 1, f"FAIL: expected 1 URL from protocol-relative href, got {found}"
+    url = list(found)[0]
+    assert url == "https://www.traversgray.com.au/21534560", (
+        f"FAIL: got {url!r} — domain doubling or wrong scheme"
+    )
+    assert "//traversgray.com.au//" not in url, "FAIL: domain doubling bug has regressed"
+    print("PASS: protocol-relative href resolved correctly with no domain doubling")
+
+    # The www./non-www. normalization specifically
+    assert adapter._looks_like_listing_url(
+        "https://www.traversgray.com.au/21631808", "https://traversgray.com.au"
+    ), "FAIL: www. variant of a URL should match a non-www. domain"
+    assert adapter._looks_like_listing_url(
+        "https://traversgray.com.au/21631808", "https://www.traversgray.com.au"
+    ), "FAIL: non-www. variant of a URL should match a www. domain"
+    print("PASS: www./non-www. variants of the same domain correctly match each other")
+
+
+def test_other_real_url_styles_unaffected_by_protocol_relative_fix():
+    """Confirms the protocol-relative fix didn't regress any other
+    confirmed real URL style from earlier in this project."""
+    adapter = GenericFallbackAdapter()
+
+    cases = [
+        ("https://viridityre.com.au/76-3-reid-avenue-westmead-nsw-6194909", "https://viridityre.com.au"),
+        ("https://www.crystalrealty.com.au/sale/nsw/inner-west/newtown/residential/terrace/8654822", "https://www.crystalrealty.com.au"),
+        ("https://www.jbreproperty.com.au/803-30-barr-street-camperdown-nsw-6195868", "https://www.jbreproperty.com.au"),
+        ("https://www.wiseberry.com.au/listing/16-adrian-close-bateau-bay-nsw-2261-36368", "https://www.wiseberry.com.au"),
+        ("https://www.parkproperties.com.au/sale/nsw/inner-west/erskineville/residential/apartment/8661195", "https://www.parkproperties.com.au"),
+    ]
+    for url, dom in cases:
+        assert adapter._looks_like_listing_url(url, dom), f"FAIL: regression on {url}"
+
+    html_relative = '<a href="../11-blackwall-point-road-chiswick-nsw-6195827"></a>'
+    found = adapter._collect_listing_urls(html_relative, "https://viridityre.com.au")
+    assert "https://viridityre.com.au/11-blackwall-point-road-chiswick-nsw-6195827" in found
+
+    print("PASS: all previously confirmed real URL styles still work after the protocol-relative fix")
+
+
+def test_listing_url_heuristic_accepts_bare_numeric_id_urls():
+    """
+    Regression test for a real bug found via live testing (June 2026):
+    Travers Gray Real Estate (platform: ReNet) uses BARE numeric-ID
+    listing URLs with no slug or hyphens at all — e.g. "/21631808" (9
+    characters). The original heuristic required len(path) > 15, which
+    wrongly rejected these short, genuinely valid listing URLs. The
+    numeric-ID-at-the-end requirement alone already excludes every real
+    nav link confirmed across every site tested (nav links never end in
+    4+ digits), so the length check was redundant and actively harmful.
+    """
+    adapter = GenericFallbackAdapter()
+    domain = "https://www.traversgray.com.au"
+
+    real_listing_urls = [
+        "https://www.traversgray.com.au/21631808",
+        "https://www.traversgray.com.au/21621319",
+    ]
+    for url in real_listing_urls:
+        assert adapter._looks_like_listing_url(url, domain), f"FAIL: should accept bare numeric ID URL {url}"
+
+    nav_urls = [
+        "https://www.traversgray.com.au/for-sale",
+        "https://www.traversgray.com.au/sold",
+        "https://www.traversgray.com.au/about",
+        "https://www.traversgray.com.au/",
+    ]
+    for url in nav_urls:
+        assert not adapter._looks_like_listing_url(url, domain), f"FAIL: should reject nav link {url}"
+
+    print("PASS: bare numeric-ID listing URLs (no slug, no hyphens) are correctly accepted, "
+          "nav links still correctly rejected")
+
+
 def test_listing_url_heuristic_real_world_confirmed_urls():
     """
     Regression test for a real bug found via live testing (June 2026):
@@ -251,5 +352,8 @@ if __name__ == "__main__":
     test_looks_like_listing_url_heuristic()
     test_collect_listing_urls_finds_homepage_embedded_listings()
     test_collect_listing_urls_handles_relative_hrefs()
+    test_protocol_relative_urls_resolved_without_doubling()
+    test_other_real_url_styles_unaffected_by_protocol_relative_fix()
+    test_listing_url_heuristic_accepts_bare_numeric_id_urls()
     test_listing_url_heuristic_real_world_confirmed_urls()
     print("\nAll generic fallback adapter tests passed.")
