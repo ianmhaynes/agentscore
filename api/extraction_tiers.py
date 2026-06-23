@@ -307,6 +307,63 @@ def try_generic_dollar_scan(html, log=None):
     }
 
 
+def try_reapit_agentbox_pattern(html, log=None):
+    """
+    Tier 3d. Confirmed real pattern for the Reapit/Agentbox platform
+    (Crystal Realty, confirmed via its own "Powered by Reapit Websites"
+    footer credit — June 2026):
+        #### 13/54 Regent Street Chippendale NSW
+        $ 890,000
+        ...
+        Contract
+        Sold
+    Address in an <h4>, price as plain text immediately after (not
+    inside any specific class), and an explicit "Contract" label/value
+    pair giving real status ("Sold" / "For Sale") rather than needing
+    to infer it from a URL path or text prefix. This is a genuinely
+    different, fourth confirmed pattern — not a variant of tier 3b
+    (Belle's class="price"/class="address"), since neither the address
+    nor price element here carries those specific class names.
+    """
+    addr_match = re.search(r"<h4[^>]*>([^<]+)</h4>", html)
+    if not addr_match:
+        return None
+    address = addr_match.group(1).strip()
+    if not address or len(address) < 5:
+        return None
+
+    # Price: the first $ amount appearing shortly after the h4 close tag
+    after_address = html[addr_match.end():addr_match.end() + 500]
+    price_match = re.search(r"\$\s*([\d,]+)", after_address)
+    price = ""
+    if price_match:
+        try:
+            price = str(int(price_match.group(1).replace(",", "")))
+        except ValueError:
+            price = ""
+
+    # Status: confirmed explicit "Contract" label/value pair
+    status = ""
+    contract_match = re.search(r"Contract(?:<[^>]*>)*\s*([A-Za-z][A-Za-z ]*)", html)
+    if contract_match:
+        contract_value = contract_match.group(1).strip().lower()
+        if "sold" in contract_value:
+            status = "Sold"
+        elif "sale" in contract_value:
+            status = "Active"
+
+    if log:
+        log("    [tier 3d: Reapit/Agentbox pattern - h4 address + Contract field] matched")
+    return {
+        "address": address,
+        "suburb": "",
+        "postcode": "",
+        "price": price,
+        "status": status,
+        "tier": "reapit_agentbox_pattern",
+    }
+
+
 def try_llm_extraction(html, listing_url, api_key, log=None, model="claude-haiku-4-5-20251001"):
     """
     Tier 4 — the true last resort. Only called when tiers 1-3 all fail.
@@ -403,6 +460,7 @@ def extract_listing_fields(html, listing_url, log=None, llm_api_key=None):
         try_meta_tags,
         try_known_shared_template,
         try_class_price_address,
+        try_reapit_agentbox_pattern,
         try_generic_dollar_scan,
     ):
         result = tier_fn(html, log=log)

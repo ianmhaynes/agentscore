@@ -720,10 +720,16 @@ class GenericFallbackAdapter:
     # paths below ever surfaced them, so the homepage itself must also
     # be scanned, not just used for detect(). "/show-all-properties" is
     # premises.com.au's specific "Properties For Sale" index path.
+    # "/selling/recent-sales" and "/buying/properties-for-sale" are
+    # confirmed real paths for Crystal Realty (platform: Reapit/
+    # Agentbox, confirmed via its own "Powered by Reapit Websites"
+    # footer credit) — found by directly inspecting its real nav menu
+    # after the original candidate list never matched anything for it.
     CANDIDATE_INDEX_PATHS = [
         "", "/buy", "/properties/for-sale", "/properties-for-sale",
         "/for-sale", "/listings/buy", "/sell/recently-sold",
         "/recently-sold", "/sold", "/show-all-properties",
+        "/selling/recent-sales", "/buying/properties-for-sale",
     ]
 
     def __init__(self, llm_api_key=None):

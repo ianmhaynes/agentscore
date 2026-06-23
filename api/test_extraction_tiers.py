@@ -117,6 +117,54 @@ def test_tier3b_class_price_address():
     print("PASS: tier 3b (class=price/address) preserves the original Belle Property finding")
 
 
+def test_tier3d_reapit_agentbox_pattern():
+    """
+    Confirmed real pattern (Crystal Realty, June 2026, platform: Reapit/
+    Agentbox — confirmed via its own "Powered by Reapit Websites"
+    footer): address in <h4>, price as plain text right after, and an
+    explicit "Contract" label/value pair giving real status. Fixtures
+    built directly from real fetched page content.
+    """
+    real_sold_html = """
+    <html><body>
+    <span>Property ID: 1P2799</span>
+    <h4>13/54 Regent Street Chippendale NSW</h4>
+    <div>$ 890,000</div>
+    <div>
+    <span>Type</span><span>Apartment</span>
+    <span>Contract</span><span>Sold</span>
+    <span>Building Size</span><span>94 sqm</span>
+    </div>
+    </body></html>
+    """
+    real_active_no_price_html = """
+    <html><body>
+    <span>Property ID: 1P2789</span>
+    <h4>40 Forbes Street Newtown NSW</h4>
+    <div>Contact agent</div>
+    <div>
+    <span>Type</span><span>Land</span>
+    <span>Contract</span><span>For Sale</span>
+    </div>
+    </body></html>
+    """
+
+    sold_result = et.try_reapit_agentbox_pattern(real_sold_html)
+    assert sold_result is not None
+    assert sold_result["address"] == "13/54 Regent Street Chippendale NSW"
+    assert sold_result["price"] == "890000"
+    assert sold_result["status"] == "Sold"
+
+    active_result = et.try_reapit_agentbox_pattern(real_active_no_price_html)
+    assert active_result is not None
+    assert active_result["address"] == "40 Forbes Street Newtown NSW"
+    assert active_result["price"] == "", "Contact agent listings should have no parseable price"
+    assert active_result["status"] == "Active"
+
+    print("PASS: tier 3d (Reapit/Agentbox h4 + Contract field) correctly handles "
+          "both sold and Contact-agent active listings")
+
+
 def test_tier3c_generic_scan():
     result = et.try_generic_dollar_scan(GENERIC_SCAN_HTML)
     assert result is not None
@@ -202,6 +250,7 @@ if __name__ == "__main__":
     test_tier3_known_shared_template()
     test_tier3_handles_nested_tags_in_address()
     test_tier3b_class_price_address()
+    test_tier3d_reapit_agentbox_pattern()
     test_tier3c_generic_scan()
     test_priority_order_json_ld_beats_everything()
     test_no_tier_matches_returns_none()
