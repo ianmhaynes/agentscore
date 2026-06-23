@@ -231,6 +231,32 @@ can't silently reappear. This is a genuine reminder that "the tests
 pass" and "this works on the real site" are not the same claim — see
 `test_tier3d_contract_field_with_whitespace_between_tags` for detail.
 
+**A second, different www. case found (Park Properties, June 2026)**:
+unlike Crystal Realty's DNS resolution failure, Park Properties' bare
+domain (no "www.") connects successfully (status 200, no exception at
+all) but serves content yielding ZERO matching listings via every
+candidate path, while "www.parkproperties.com.au" works fully (41 real
+listings confirmed). Extended the retry logic: if `GenericFallbackAdapter`
+finds zero listings on the bare domain, proactively retry once with
+"www." before giving up — scoped specifically to the generic fallback
+adapter (Ray White/Cloudhi/LJ Hooker already have their own confirmed
+domain conventions, so a genuine zero-listings result from them is more
+likely a real "nothing to find" than a www./non-www. quirk). Same
+one-shot-only guard against looping if the www. variant also yields
+nothing.
+
+## API key persistence (browser-side only)
+
+Both API key fields (Google Places, Anthropic) now persist across
+page refreshes via the browser's own `localStorage` — purely
+client-side, saved on the user's own machine, never sent to or stored
+on any server except in the actual `/api/discover` or `/api/scrape`
+request when a button is clicked, exactly as before this change.
+Wrapped in try/catch since `localStorage` can throw in some
+private-browsing modes or if disabled by the browser — in that case
+the keys simply won't persist (a silent, harmless degradation), not a
+broken page.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style

@@ -363,6 +363,53 @@ raywhitesurfersparadise.com.au"></textarea>
 let lastListings = [];
 let discoveredAgencies = [];
 
+// Persist both API key fields in the browser's own localStorage so a
+// page refresh doesn't require re-entering them. This is purely
+// client-side — the keys are saved on the user's own machine and never
+// sent anywhere except in the actual /api/discover or /api/scrape
+// request when the user clicks a button, exactly as before. Wrapped in
+// try/catch since localStorage can throw in some private-browsing
+// modes or if disabled — in that case the keys simply won't persist,
+// which is a silent, harmless degradation rather than a broken page.
+const API_KEY_FIELDS = ['discoverApiKey', 'llmApiKey'];
+
+function loadSavedApiKeys() {
+  for (const fieldId of API_KEY_FIELDS) {
+    try {
+      const saved = localStorage.getItem('agentscore_' + fieldId);
+      if (saved) {
+        const el = document.getElementById(fieldId);
+        if (el) el.value = saved;
+      }
+    } catch (e) {
+      // localStorage unavailable (private browsing, disabled, etc.) — skip silently
+    }
+  }
+}
+
+function setupApiKeyPersistence() {
+  for (const fieldId of API_KEY_FIELDS) {
+    const el = document.getElementById(fieldId);
+    if (!el) continue;
+    el.addEventListener('input', () => {
+      try {
+        if (el.value) {
+          localStorage.setItem('agentscore_' + fieldId, el.value);
+        } else {
+          localStorage.removeItem('agentscore_' + fieldId);
+        }
+      } catch (e) {
+        // localStorage unavailable — typing still works, just won't persist
+      }
+    });
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadSavedApiKeys();
+  setupApiKeyPersistence();
+});
+
 function setStatus(msg) {
   document.getElementById('statusLine').textContent = msg;
 }
