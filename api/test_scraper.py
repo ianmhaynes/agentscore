@@ -350,6 +350,99 @@ def test_cloudhi_dates_and_days_on_market():
     print(f"  Sold row date_listed/sold_date/days_on_market: {sold.date_listed} / {sold.sold_date} / {sold.days_on_market}")
 
 
+def test_scrape_office_retries_with_www_on_dns_failure():
+    """
+    Regression test for a real bug found via live testing (June 2026):
+    Crystal Realty's bare domain (no "www.") genuinely fails DNS
+    resolution in production, while "www.crystalrealty.com.au" resolves
+    fine — a real DNS configuration choice some sites make, not
+    something fixable by changing our code's request logic alone.
+    Fixture built directly from the EXACT real error message returned
+    by the live deployed app.
+    """
+    import scraper as scraper_module
+    import requests
+
+    class FakeResponse:
+        def __init__(self, text, status_code=200):
+            self.text = text
+            self.status_code = status_code
+
+    class FakeDNSFailSession:
+        def __init__(self):
+            self.headers = {}
+        def get(self, url, timeout=None):
+            if url == "https://crystalrealty.com.au":
+                raise requests.exceptions.ConnectionError(
+                    "HTTPSConnectionPool(host='crystalrealty.com.au', port=443): "
+                    "Max retries exceeded with url: / (Caused by NameResolutionError("
+                    "\"HTTPSConnection(host='crystalrealty.com.au', port=443): "
+                    "Failed to resolve 'crystalrealty.com.au' ([Errno -5] No address associated with hostname)\"))"
+                )
+            elif url == "https://www.crystalrealty.com.au":
+                return FakeResponse('<html><body><h4>13/54 Regent Street Chippendale NSW</h4><div>$ 890,000</div></body></html>')
+            return FakeResponse("", status_code=404)
+
+    original_session = scraper_module.requests.Session
+    scraper_module.requests.Session = FakeDNSFailSession
+    try:
+        logs = []
+        listings, error = scraper_module.scrape_office("crystalrealty.com.au", log=logs.append)
+        assert error is None, f"FAIL: should succeed after www. retry, got error: {error}"
+        assert any("retrying with https://www.crystalrealty.com.au" in l for l in logs)
+        print("PASS: bare domain DNS failure correctly retries with www. and succeeds "
+              "(exact real production error message used as fixture)")
+    finally:
+        scraper_module.requests.Session = original_session
+
+
+def test_scrape_office_www_retry_does_not_loop_or_overreach():
+    """Two safety guards on the www. retry: (1) if the domain already
+    has www. and still fails, don't retry again (no infinite loop);
+    (2) non-DNS errors (timeout, refused connection, etc.) should not
+    trigger a www. retry at all, since changing the hostname wouldn't
+    fix those."""
+    import scraper as scraper_module
+    import requests
+
+    class FakeAlwaysFailsSession:
+        def __init__(self):
+            self.headers = {}
+        def get(self, url, timeout=None):
+            raise requests.exceptions.ConnectionError(
+                "Failed to resolve 'www.totallybroken.com.au' ([Errno -5] No address associated with hostname)"
+            )
+
+    original_session = scraper_module.requests.Session
+    scraper_module.requests.Session = FakeAlwaysFailsSession
+    try:
+        logs = []
+        listings, error = scraper_module.scrape_office("www.totallybroken.com.au", log=logs.append)
+        assert error is not None and "could not reach" in error.lower()
+        print("PASS: an already-www. domain that fails DNS does not loop, fails cleanly")
+    finally:
+        scraper_module.requests.Session = original_session
+
+    class FakeTimeoutSession:
+        def __init__(self):
+            self.headers = {}
+            self.call_count = 0
+        def get(self, url, timeout=None):
+            self.call_count += 1
+            raise requests.exceptions.ReadTimeout("Read timed out. (read timeout=20)")
+
+    original_session2 = scraper_module.requests.Session
+    fake_timeout = FakeTimeoutSession()
+    scraper_module.requests.Session = lambda: fake_timeout
+    try:
+        logs = []
+        listings, error = scraper_module.scrape_office("slowsite.com.au", log=logs.append)
+        assert fake_timeout.call_count == 1, "Should NOT retry for a non-DNS error like timeout"
+        print("PASS: non-DNS errors (timeout, etc.) are not retried with www. — wouldn't help anyway")
+    finally:
+        scraper_module.requests.Session = original_session2
+
+
 def test_calculate_days_on_market():
     from scraper import calculate_days_on_market
     # Sold case: fixed start and end
@@ -374,5 +467,7 @@ if __name__ == "__main__":
     test_cloudhi_detail_page_parsing()
     test_cloudhi_full_fetch()
     test_cloudhi_dates_and_days_on_market()
+    test_scrape_office_retries_with_www_on_dns_failure()
+    test_scrape_office_www_retry_does_not_loop_or_overreach()
     test_calculate_days_on_market()
     print("\nAll tests passed.")

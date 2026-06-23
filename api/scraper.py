@@ -725,11 +725,20 @@ class GenericFallbackAdapter:
     # Agentbox, confirmed via its own "Powered by Reapit Websites"
     # footer credit) — found by directly inspecting its real nav menu
     # after the original candidate list never matched anything for it.
+    # "/buying/recently-sold" added after confirming Park Properties'
+    # real sold-listings path includes pagination under this prefix
+    # (June 2026). Note: Travers Gray Real Estate's homepage is a video
+    # splash screen linking only to /officelocation, which was initially
+    # suspected to block discovery entirely — but confirmed NOT to be an
+    # issue, since /sold and /for-sale (already in this list) are tried
+    # directly against the domain root regardless of how the homepage
+    # itself links to anything.
     CANDIDATE_INDEX_PATHS = [
         "", "/buy", "/properties/for-sale", "/properties-for-sale",
         "/for-sale", "/listings/buy", "/sell/recently-sold",
         "/recently-sold", "/sold", "/show-all-properties",
         "/selling/recent-sales", "/buying/properties-for-sale",
+        "/buying/recently-sold",
     ]
 
     def __init__(self, llm_api_key=None):
@@ -764,11 +773,18 @@ class GenericFallbackAdapter:
         # Crystal Realty's URL (only 1 hyphen, in "inner-west") since
         # that site uses slashes rather than hyphens to separate path
         # segments. Dropped that requirement; the numeric-ID check does
-        # the real work. A short minimum length still guards against
-        # matching a tiny, clearly-not-a-listing path that happens to
-        # end in a short number.
-        ends_in_numeric_id = bool(re.search(r"[-/]\d{4,}/?$", path))
-        return ends_in_numeric_id and len(path) > 15
+        # the real work.
+        #
+        # A minimum-length check (len(path) > 15) was also dropped after
+        # a second real bug: Travers Gray Real Estate (platform: ReNet)
+        # uses BARE numeric-ID URLs with no slug at all — e.g. "/21631808"
+        # (9 characters) — which the length check wrongly rejected. The
+        # numeric-ID-at-the-end requirement alone already excludes every
+        # real nav link seen across all sites tested (e.g. "/buy",
+        # "/about", "/sold" never end in 4+ digits), so the extra length
+        # guard was redundant protection that became actively harmful
+        # once a real site with short listing URLs was found.
+        return bool(re.search(r"[-/]\d{4,}/?$", path))
 
     def _collect_listing_urls(self, html, domain):
         urls = set()
@@ -947,7 +963,27 @@ def scrape_office(raw_url, log=print, llm_api_key=None):
         session.headers.update({"User-Agent": USER_AGENT})
         resp = session.get(domain, timeout=REQUEST_TIMEOUT)
     except requests.RequestException as e:
-        return [], f"Could not reach site: {e}"
+        # Confirmed real case (Crystal Realty, June 2026): the bare
+        # domain (no "www.") can genuinely fail DNS resolution while
+        # "www.{domain}" resolves fine — this is a real, fairly common
+        # DNS configuration choice some sites make, not a code bug.
+        # Retry once with "www." prepended specifically for name-
+        # resolution failures; other error types (timeout, connection
+        # refused, SSL errors) wouldn't be fixed by changing the
+        # hostname, so they're not worth retrying here.
+        is_dns_failure = "NameResolutionError" in str(e) or "Failed to resolve" in str(e)
+        netloc = urlparse(domain).netloc
+        already_has_www = netloc.startswith("www.")
+        if is_dns_failure and not already_has_www:
+            www_domain = domain.replace("://", "://www.", 1)
+            log(f"  {domain} failed DNS resolution, retrying with {www_domain} ...")
+            try:
+                resp = session.get(www_domain, timeout=REQUEST_TIMEOUT)
+                domain = www_domain  # use the working hostname for all subsequent requests
+            except requests.RequestException as e2:
+                return [], f"Could not reach site (tried both {domain.replace('www.', '')} and {www_domain}): {e2}"
+        else:
+            return [], f"Could not reach site: {e}"
 
     if resp.status_code != 200:
         return [], f"Site returned HTTP {resp.status_code}"

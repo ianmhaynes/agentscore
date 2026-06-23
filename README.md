@@ -139,6 +139,73 @@ the agreed plan is to first prove the pipeline's value at a single
 city/region scale (tens of offices, which batching now supports) before
 investing in infrastructure for three-orders-of-magnitude more targets.
 
+## Session 2 findings (June 23, 2026) — 4 more confirmed patterns, 2 more known gaps
+
+Continued the same disciplined approach (real raw HTML before any code
+change) against the remaining 0-row sites from Session 1's Newtown
+test. Two more confirmed, fixable patterns built; two confirmed genuine
+gaps, same category as LJ Hooker's JS-loaded platform.
+
+**Tier 3d (Reapit/Agentbox)** — extended to cover a second platform.
+Confirmed `<h4>`-address + nearby-price shape shared by BOTH Crystal
+Realty (Reapit/Agentbox, explicit "Contract" label for status) AND
+Park Properties (Agentpoint, no Contract label — a standalone "Sold"
+text node before the price instead, checked as a fallback). A real
+offset bug was found and fixed in the Agentpoint fallback: the original
+code computed a price-match position relative to a substring but then
+sliced the FULL document with that offset directly, always pointing at
+the wrong region of the page.
+
+**Tier 3e (semi-bold/muted)** — Pilcher Residential, confirmed via live
+DevTools inspection: status in `class="semi-bold"`, price in a sibling
+`class="muted"` — separate elements, distinct from every
+combined-string tier built so far.
+
+**Tier 3f (ReNet heading pattern)** — Travers Gray Real Estate
+(platform: ReNet, confirmed via "Marketing by ... and ReNet Real
+Estate Software" footer): suburb and street address in SEPARATE `<h2>`/
+`<h3>` headings (not adjacent the way tier 3's Viridity/JBRE pattern
+is), status+price combined in a LATER `<h2>` ("Sold for $X").
+
+**Real bug fixed in `_looks_like_listing_url()`**: a minimum-length
+check (`len(path) > 15`) wrongly rejected Travers Gray's bare
+numeric-ID listing URLs (e.g. `/21631808`, 9 characters — no slug, no
+hyphens at all). Removed the length check entirely; the numeric-ID-at-
+the-end requirement alone already excludes every real nav link
+confirmed across every site tested in this project so far.
+
+**Confirmed genuine gap (not fixable without a browser)**:
+**BresicWhitney** shows `"Authenticated is false"` and "This property
+is only available on BW.com.au, click to see more" in search results —
+a real, confirmed signal that listing content is gated behind
+client-side authentication/JavaScript, the same category of problem as
+LJ Hooker's HubSpot platform. Not investigated further given the
+explicit decision against Playwright/browser rendering.
+
+**Travers Gray's homepage gate is a non-issue, confirmed by testing**:
+initially suspected the splash-screen homepage (only one link, "Enter
+Website") would block discovery entirely, since the real nav only
+appears on a sub-page. Confirmed this doesn't matter — `fetch()` tries
+every `CANDIDATE_INDEX_PATHS` entry directly against the domain root
+regardless of how the homepage itself links to anything, so `/sold`
+and `/for-sale` (already in the candidate list) are reached either way.
+
+**Crystal Realty's real cause, found via direct curl diagnostic on the
+live deployed app**: not an extraction or discovery bug at all — a
+genuine DNS resolution failure. The bare domain `crystalrealty.com.au`
+(no "www.") does not resolve, while `www.crystalrealty.com.au` resolves
+fine — a real DNS configuration choice some sites make. Fixed in
+`scrape_office()`: on a confirmed `NameResolutionError`/DNS failure for
+a non-www domain, automatically retry once with "www." prepended before
+giving up. Two safety guards: an already-www. domain that still fails
+DNS does not retry again (no infinite loop), and non-DNS errors
+(timeouts, refused connections, SSL errors) are never retried this way
+since changing the hostname wouldn't fix those.
+
+**Still open**: livingea.com.au not yet directly inspected (search
+results returned only "about us" / testimonial content, no listing
+data).
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style
