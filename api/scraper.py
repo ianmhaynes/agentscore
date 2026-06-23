@@ -935,6 +935,13 @@ class GenericFallbackAdapter:
                 log(f"    ERROR fetching {listing_url}: {e}")
                 continue
             if resp.status_code != 200:
+                # CONFIRMED REAL BUG (June 23, 2026): this case was
+                # previously silent — no log line at all — which hid
+                # the real cause of traversgray.com.au returning 0
+                # parsed listings for an entire debugging session. Now
+                # logged explicitly so a non-200 response is visible
+                # rather than indistinguishable from "parsing failed".
+                log(f"    {listing_url} returned HTTP {resp.status_code}, skipping")
                 continue
             parsed = self._parse_detail_page(resp.text, listing_url, domain, log)
             if parsed:
