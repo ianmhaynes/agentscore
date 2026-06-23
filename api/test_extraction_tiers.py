@@ -165,6 +165,48 @@ def test_tier3d_reapit_agentbox_pattern():
           "both sold and Contact-agent active listings")
 
 
+def test_tier3d_agentpoint_status_fallback():
+    """
+    Confirmed real pattern (Park Properties, June 2026, platform:
+    Agentpoint — confirmed via its own "Powered by Agentpoint" footer).
+    Shares the same <h4>-address + nearby-price shape as Crystal
+    Realty's Reapit/Agentbox pattern, but has NO "Contract" label —
+    instead a standalone "Sold" text node appears on its own line right
+    before the price. Regression test for a real bug found via testing:
+    the original fallback code computed price_match.start() relative to
+    a substring (after_address) but then sliced the FULL html with that
+    offset directly, pointing at completely the wrong region of the
+    page and always finding nothing.
+    """
+    real_sold_html = """
+    <html><body>
+    <h4>20/12-14 Enmore Road, NEWTOWN</h4>
+    <div>Studio</div>
+    <h5>Modern studio apartment w/ city views</h5>
+    <div>Sold</div>
+    <div>$ 490,000</div>
+    <div>1</div>
+    </body></html>
+    """
+    result = et.try_reapit_agentbox_pattern(real_sold_html)
+    assert result is not None
+    assert result["address"] == "20/12-14 Enmore Road, NEWTOWN"
+    assert result["price"] == "490000"
+    assert result["status"] == "Sold", f"FAIL: {result['status']!r} (offset bug regression)"
+
+    real_active_html = """
+    <html><body>
+    <h4>5 Test Street, NEWTOWN</h4>
+    <div>$ 800,000</div>
+    </body></html>
+    """
+    active_result = et.try_reapit_agentbox_pattern(real_active_html)
+    assert active_result["status"] == "", "Listing with no Sold text and no Contract field should not guess a status"
+
+    print("PASS: tier 3d correctly handles the Agentpoint standalone-Sold-text status "
+          "fallback (and the offset bug that originally broke it)")
+
+
 def test_tier3c_generic_scan():
     result = et.try_generic_dollar_scan(GENERIC_SCAN_HTML)
     assert result is not None
@@ -251,6 +293,7 @@ if __name__ == "__main__":
     test_tier3_handles_nested_tags_in_address()
     test_tier3b_class_price_address()
     test_tier3d_reapit_agentbox_pattern()
+    test_tier3d_agentpoint_status_fallback()
     test_tier3c_generic_scan()
     test_priority_order_json_ld_beats_everything()
     test_no_tier_matches_returns_none()

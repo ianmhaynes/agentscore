@@ -309,21 +309,32 @@ def try_generic_dollar_scan(html, log=None):
 
 def try_reapit_agentbox_pattern(html, log=None):
     """
-    Tier 3d. Confirmed real pattern for the Reapit/Agentbox platform
-    (Crystal Realty, confirmed via its own "Powered by Reapit Websites"
-    footer credit — June 2026):
+    Tier 3d. Confirmed real pattern shared by TWO distinct platforms —
+    same <h4>-address + nearby-$-price shape, different status signal:
+
+    Reapit/Agentbox (Crystal Realty, confirmed via "Powered by Reapit
+    Websites" footer — June 2026):
         #### 13/54 Regent Street Chippendale NSW
         $ 890,000
         ...
         Contract
         Sold
-    Address in an <h4>, price as plain text immediately after (not
-    inside any specific class), and an explicit "Contract" label/value
-    pair giving real status ("Sold" / "For Sale") rather than needing
-    to infer it from a URL path or text prefix. This is a genuinely
-    different, fourth confirmed pattern — not a variant of tier 3b
-    (Belle's class="price"/class="address"), since neither the address
-    nor price element here carries those specific class names.
+    Explicit "Contract" label/value pair gives real status.
+
+    Agentpoint (Park Properties, confirmed via "Powered by Agentpoint"
+    footer — June 2026):
+        #### 20/12-14 Enmore Road, NEWTOWN
+        Sold
+        $ 490,000
+    NO "Contract" label at all — a standalone "Sold" text node appears
+    on its own line right before the price instead. Checked as a
+    fallback only when the Contract-field check finds nothing.
+
+    Address in an <h4>, price as plain text nearby (not inside any
+    specific class) — confirmed common to both. This is a genuinely
+    different, fourth confirmed pattern family — not a variant of
+    tier 3b (Belle's class="price"/class="address"), since neither the
+    address nor price element here carries those specific class names.
     """
     addr_match = re.search(r"<h4[^>]*>([^<]+)</h4>", html)
     if not addr_match:
@@ -342,7 +353,15 @@ def try_reapit_agentbox_pattern(html, log=None):
         except ValueError:
             price = ""
 
-    # Status: confirmed explicit "Contract" label/value pair
+    # Status: confirmed explicit "Contract" label/value pair (Reapit/
+    # Agentbox, Crystal Realty). A second, real platform — Agentpoint
+    # (confirmed via Park Properties' own "Powered by Agentpoint"
+    # footer credit) — shares this same <h4>-address + nearby-price
+    # shape but has NO "Contract" label at all; instead a standalone
+    # "Sold" text token appears as its own short line right before the
+    # price. Checked as a fallback only if the Contract-field check
+    # above found nothing, since the explicit label is more reliable
+    # when present.
     status = ""
     contract_match = re.search(r"Contract(?:<[^>]*>)*\s*([A-Za-z][A-Za-z ]*)", html)
     if contract_match:
@@ -351,6 +370,20 @@ def try_reapit_agentbox_pattern(html, log=None):
             status = "Sold"
         elif "sale" in contract_value:
             status = "Active"
+    else:
+        # Agentpoint fallback: a standalone "Sold" text node appearing
+        # shortly before the price (confirmed: Park Properties shows
+        # "Sold" on its own line directly above "$ 490,000"). Must
+        # convert price_match's position (relative to the after_address
+        # substring) back to an absolute offset in the full html before
+        # slicing — a real bug found via testing: the original code
+        # sliced html using an after_address-relative offset directly,
+        # which pointed at the wrong region of the page entirely.
+        if price_match:
+            absolute_price_pos = addr_match.end() + price_match.start()
+            before_price = html[max(0, absolute_price_pos - 200):absolute_price_pos]
+            if re.search(r">\s*Sold\s*<", before_price, re.IGNORECASE):
+                status = "Sold"
 
     if log:
         log("    [tier 3d: Reapit/Agentbox pattern - h4 address + Contract field] matched")
