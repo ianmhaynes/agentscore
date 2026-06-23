@@ -203,6 +203,51 @@ def test_collect_listing_urls_handles_relative_hrefs():
           "real listings found and nav links correctly excluded")
 
 
+def test_wordpress_plugin_calendar_urls_excluded():
+    """
+    Regression test for a real false positive found via live testing
+    (Stone Real Estate, June 23, 2026): a WordPress plugin called
+    "ZooRealty" generates calendar-reminder (.ics) links for open-home/
+    auction times, shaped like
+    "/wp-content/plugins/zoorealty/display/elements/crm.php
+    ?property_id=8733796&time=16:15:00" — confirmed via direct fetch to
+    be an iCalendar file, NOT a property listing page, despite ending
+    in a numeric ID that satisfied the existing heuristic.
+    """
+    adapter = GenericFallbackAdapter()
+    domain = "https://stonerealestate.com.au"
+    calendar_url = (
+        "https://www.stonerealestate.com.au/wp-content/plugins/zoorealty/"
+        "display/elements/crm.php?property_id=8733796&time=16:15:00"
+    )
+    assert not adapter._looks_like_listing_url(calendar_url, domain), (
+        "FAIL: should reject WordPress plugin calendar widget URLs"
+    )
+    print("PASS: WordPress plugin calendar-widget URLs are correctly excluded")
+
+
+def test_id_first_slug_url_pattern():
+    """
+    Confirmed real exception (Stone Real Estate, platform: Reapit
+    Websites via a WordPress "ZooRealty" wrapper — June 23, 2026):
+    listing URLs put the numeric ID FIRST in the slug, not last — e.g.
+    "/property/6561371-10-trade-street-newtown-nsw/". Also confirms a
+    real bug found while building this exception: the first version of
+    the regex required a LETTER immediately after the ID, but the real
+    slug can have a numeric segment next (e.g. a street number like
+    "10" right after the property ID), which a letter-only check missed.
+    """
+    adapter = GenericFallbackAdapter()
+    domain = "https://stonerealestate.com.au"
+    real_url = "https://www.stonerealestate.com.au/property/6561371-10-trade-street-newtown-nsw/"
+    assert adapter._looks_like_listing_url(real_url, domain), (
+        "FAIL: should accept the confirmed real ID-first listing URL pattern, "
+        "including when a numeric street number immediately follows the ID"
+    )
+    print("PASS: ID-first slug URL pattern correctly accepted, including the "
+          "numeric-segment-after-ID edge case")
+
+
 def test_eagle_software_property_id_url_pattern():
     """
     Confirmed real exception (Living Estate Agents, platform: Eagle
@@ -368,6 +413,8 @@ if __name__ == "__main__":
     test_looks_like_listing_url_heuristic()
     test_collect_listing_urls_finds_homepage_embedded_listings()
     test_collect_listing_urls_handles_relative_hrefs()
+    test_wordpress_plugin_calendar_urls_excluded()
+    test_id_first_slug_url_pattern()
     test_eagle_software_property_id_url_pattern()
     test_protocol_relative_urls_resolved_without_doubling()
     test_other_real_url_styles_unaffected_by_protocol_relative_fix()

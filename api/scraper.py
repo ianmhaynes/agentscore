@@ -772,6 +772,21 @@ class GenericFallbackAdapter:
             return False
         path = normalized_url[len(normalized_domain):]
 
+        # CONFIRMED REAL FALSE POSITIVE (Stone Real Estate, June 23,
+        # 2026): a WordPress plugin called "ZooRealty" generates
+        # calendar-reminder (.ics) links for open-home/auction times,
+        # shaped like
+        # "/wp-content/plugins/zoorealty/display/elements/crm.php
+        # ?property_id=8733796&time=16:15:00" — these end in a numeric
+        # ID and were wrongly accepted as listing pages, but are
+        # actually iCalendar files (confirmed via direct fetch), not
+        # property pages at all. Excluded by checking for
+        # "wp-content/plugins" anywhere in the path, since no real
+        # listing page should ever live inside a plugin's own asset
+        # directory regardless of platform.
+        if "wp-content/plugins" in path.lower():
+            return False
+
         # Confirmed via live inspection of 5+ real sites in one session
         # (June 2026): a genuine listing URL consistently ends in a
         # numeric ID (Viridity: ...-westmead-nsw-6194909, Crystal Realty:
@@ -806,6 +821,15 @@ class GenericFallbackAdapter:
         # separate pattern rather than trying to generalize the
         # trailing-numeric-ID rule further.
         if re.search(r"property_id=\d{4,}", path):
+            return True
+        # Confirmed exception (Stone Real Estate, platform: Reapit
+        # Websites via a WordPress "ZooRealty" plugin wrapper — June 23,
+        # 2026): listing URLs put the numeric ID FIRST in the slug, not
+        # last — e.g. "/property/6561371-10-trade-street-newtown-nsw/".
+        # The general trailing-numeric-ID rule below would never match
+        # this shape; checked as its own explicit pattern instead of
+        # trying to generalize further.
+        if re.search(r"/\d{4,}-[a-zA-Z0-9]", path):
             return True
         return bool(re.search(r"[-/]\d{4,}/?$", path))
 
