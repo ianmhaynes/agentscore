@@ -818,6 +818,21 @@ class GenericFallbackAdapter:
         return urls
 
     def _parse_detail_page(self, html, listing_url, domain, log):
+        # TEMPORARY DIAGNOSTIC (June 23, 2026) — added to debug a real,
+        # confirmed mystery: the hidden-input extraction tier works
+        # correctly against real HTML fetched via curl from the user's
+        # own machine, but the live deployed app still returns 0
+        # listings for traversgray.com.au. This logs exactly what HTML
+        # the live Vercel server actually received for each listing
+        # page, to compare against what curl receives from a different
+        # network/IP — remove once the real cause is found.
+        if "traversgray" in listing_url.lower():
+            has_extra_data = "extra_data[address]" in html
+            has_renet = "renet" in html.lower()
+            log(f"    [DIAGNOSTIC] {listing_url}: html_length={len(html)}, "
+                f"has_extra_data_address={has_extra_data}, has_renet_marker={has_renet}, "
+                f"first_200_chars={html[:200]!r}")
+
         result = extraction_tiers.extract_listing_fields(
             html, listing_url, log=log, llm_api_key=self.llm_api_key,
         )
