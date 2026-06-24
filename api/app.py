@@ -11,7 +11,7 @@ from flask import Flask, request, jsonify, send_file
 import csv
 import io
 from datetime import date
-from scraper import scrape_offices
+from scraper import scrape_offices, scrape_office
 from scoring import score_agents, summary_stats
 from discovery import discover_agencies
 import db
@@ -74,6 +74,109 @@ def discover():
 
     agencies = discover_agencies(area, api_key=api_key, log=log)
     return jsonify({"agencies": agencies, "log": log_lines})
+
+
+@app.route("/api/seed-offices", methods=["POST"])
+def seed_offices():
+    """
+    Takes a list of discovered agencies (same shape as /api/discover's
+    output: [{name, place_id, website}, ...]) and writes them into the
+    offices table via upsert_office(), so the daily cron job has
+    something to scrape. This is a ONE-TIME (or occasional) action per
+    region — distinct from the actual scraping, which happens on a
+    schedule via /api/cron-scrape.
+    """
+    data = request.get_json(force=True)
+    agencies = data.get("agencies", [])
+    region = data.get("region", "").strip()
+    if not agencies:
+        return jsonify({"error": "No agencies provided"}), 400
+
+    added = []
+    skipped = []
+    for agency in agencies:
+        website = (agency.get("website") or "").strip()
+        if not website:
+            skipped.append(agency.get("name", "unknown"))
+            continue
+        domain = website.replace("https://", "").replace("http://", "").rstrip("/")
+        try:
+            office_id = db.upsert_office(domain, office_name=agency.get("name"), region=region)
+        except Exception as e:
+            return jsonify({"error": f"Database error while saving offices: {e}"}), 500
+        added.append({"id": office_id, "domain": domain, "name": agency.get("name")})
+
+    return jsonify({"added": added, "skipped_no_website": skipped})
+
+
+@app.route("/api/cron-scrape", methods=["GET", "POST"])
+def cron_scrape():
+    """
+    Intended to be called by Vercel Cron (configured in vercel.json),
+    but also callable manually via GET/POST for testing. Pulls up to
+    `limit` offices due for scraping (never scraped, or last scraped
+    over 20 hours ago — see db.get_offices_due_for_scraping), scrapes
+    each one using the EXACT SAME scrape_office() logic the interactive
+    UI uses, and writes results to listing_snapshots.
+
+    `limit` defaults conservatively low (5) to respect Vercel's
+    function timeout — the same lesson learned from the UI's own
+    client-side batching. A daily cron run with many due offices will
+    simply take several days to work through a large backlog at this
+    rate; that's an accepted tradeoff for staying within one function's
+    timeout, not a bug.
+    """
+    limit = int(request.args.get("limit", 5))
+    try:
+        offices = db.get_offices_due_for_scraping(limit=limit)
+    except Exception as e:
+        return jsonify({"error": f"Database error while fetching due offices: {e}"}), 500
+
+    results = []
+    for office in offices:
+        listings, error = scrape_office(office["domain"])
+        platform_detected = None
+        if listings:
+            platform_detected = listings[0].get("source_adapter")
+        try:
+            db.record_scrape_result(
+                office["id"], listings, platform_detected=platform_detected, error=error
+            )
+        except Exception as e:
+            # A DB write failure for one office shouldn't abort the
+            # whole batch — log it in the response and continue, since
+            # the next cron run will simply retry this office anyway
+            # (its last_scraped_at won't have been updated).
+            results.append({
+                "domain": office["domain"],
+                "listing_count": len(listings),
+                "error": f"Scrape OK but DB write failed: {e}",
+            })
+            continue
+        results.append({
+            "domain": office["domain"],
+            "listing_count": len(listings),
+            "error": error,
+        })
+
+    return jsonify({"scraped": results})
+
+
+@app.route("/api/office-status")
+def office_status():
+    """Simple monitoring view: which offices are working, which are
+    failing, and why — the Day 3 monitoring capability from the
+    production plan, built on top of db.get_office_status_summary()."""
+    try:
+        summary = db.get_office_status_summary()
+    except Exception as e:
+        return jsonify({"error": f"Database error: {e}"}), 500
+    # Convert datetime objects to ISO strings so jsonify doesn't choke
+    for row in summary:
+        for key in ("last_scraped_at", "last_success_at"):
+            if row.get(key):
+                row[key] = row[key].isoformat()
+    return jsonify({"offices": summary})
 
 
 @app.route("/api/scrape", methods=["POST"])

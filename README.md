@@ -257,6 +257,83 @@ private-browsing modes or if disabled by the browser — in that case
 the keys simply won't persist (a silent, harmless degradation), not a
 broken page.
 
+## Stone Real Estate — two real URL bugs fixed, extraction unconfirmed due to site slowness
+
+Two genuine bugs found and fixed via live testing (June 23, 2026),
+confirmed as Reapit Websites platform (same as Crystal Realty) via
+"Powered by Reapit Websites" footer credit:
+
+1. **False positive**: a WordPress plugin called "ZooRealty" generates
+   calendar-reminder (.ics) links for open-home/auction times, shaped
+   like `/wp-content/plugins/zoorealty/display/elements/crm.php
+   ?property_id=8733796&time=16:15:00` — these end in a numeric ID and
+   were wrongly accepted as listing pages by the existing heuristic.
+   Confirmed via direct fetch to be an actual iCalendar file, not a
+   property page at all. Fixed by excluding any path containing
+   `wp-content/plugins`.
+2. **Real listing URL shape not previously handled**: Stone's actual
+   listing URLs put the numeric ID FIRST in the slug, not last — e.g.
+   `/property/6561371-10-trade-street-newtown-nsw/`. A first attempt at
+   this fix required a letter immediately after the ID, which missed
+   the real case where a numeric street number (e.g. the "10" in
+   "10-trade-street") follows directly — fixed to allow either letters
+   or digits after the ID.
+
+**Extraction itself remains unconfirmed**: live testing hit a genuine
+30-second `curl` timeout (`exit code 28`) twice on this specific
+site — once on the original timeout that started this investigation,
+and again after both URL fixes were deployed. This looks like a real
+characteristic of Stone Real Estate's own server (slow response time,
+possibly compounded by checking several candidate index paths plus the
+now-correctly-rejected calendar URLs, each costing a real request even
+when excluded) rather than a code bug. Whether the detail page actually
+matches our existing tier 3d (Reapit/Agentbox `<h4>` + Contract field
+pattern) has not been directly confirmed — worth revisiting with a
+longer timeout or testing a single listing URL in isolation, next time.
+
+## Database infrastructure (June 24, 2026) — Day 1 of the 14-day production plan
+
+Added persistent storage via **Supabase Postgres**, connected through
+the **IPv4 Shared Pooler** specifically — the default "Dedicated
+Pooler" connection Supabase shows is IPv6-only on the free tier, which
+Vercel's serverless functions cannot reach (`Cannot assign requested
+address`, a well-documented Vercel/Supabase IPv6 limitation). Fixed by
+enabling the "Use IPv4 connection (Shared Pooler)" toggle on Supabase's
+Connect panel, which changes both the hostname
+(`aws-N-{region}.pooler.supabase.com`) and the username format
+(`postgres.{project_ref}` instead of plain `postgres`) — both pieces
+were needed; missing either one causes a different, equally cryptic
+error (a 404-style DNS failure or a password-auth failure that isn't
+actually about the password).
+
+**Schema** (`schema.sql`): two tables. `offices` is the master list of
+agency websites being tracked. `listing_snapshots` stores ONE ROW PER
+SCRAPE of a listing, not one row per listing — this is the key design
+choice that makes historical tracking (price changes, days on market)
+possible later just by comparing snapshots over time for the same
+`listing_url`, with no extra bookkeeping needed.
+
+**New endpoints** (`db.py`, plus three new routes in `app.py`):
+- `/api/seed-offices` — takes discovered agencies (same shape as
+  `/api/discover`'s output) and writes them into the `offices` table.
+- `/api/cron-scrape` — pulls offices due for scraping (never scraped,
+  or >20h since last attempt), scrapes each with the exact same
+  `scrape_office()` logic the interactive UI uses, writes results to
+  `listing_snapshots`. Defaults to a conservative `limit=5` per call to
+  respect Vercel's function timeout — the same lesson learned from the
+  UI's own client-side batching, just server-side now. A DB write
+  failure for one office doesn't abort the rest of the batch; that
+  office simply gets retried on the next cron run.
+- `/api/office-status` — a simple monitoring view: which offices are
+  working, failing, and why, plus how many snapshots each has produced.
+- `/api/db-test` — TEMPORARY diagnostic confirming the live connection
+  works; safe to remove once the infrastructure is confirmed stable.
+
+**Scheduling** (`vercel.json`): a Vercel Cron job calls
+`/api/cron-scrape?limit=5` once daily at 20:00 UTC (early morning
+Sydney time, before business hours). All three new endpoints are also
+callable manually for testing, independent of the cron trigger.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style
