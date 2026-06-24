@@ -11,8 +11,8 @@
   ],
   "crons": [
     {
-      "path": "/api/cron-scrape?limit=5",
-      "schedule": "0 20 * * *"
+      "path": "/api/cron-scrape?limit=15",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

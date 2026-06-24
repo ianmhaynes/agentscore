@@ -464,6 +464,70 @@ some addresses on this platform have no state suffix on the last
 comma-separated segment (e.g. `"90 Mortensen Road, Nerang"`, not
 `"..., Nerang QLD"`) — suburb extraction now handles both formats.
 
+## QLD scale estimate and the real bottleneck (June 24, 2026)
+
+Before scaling office discovery further, calculated a real, defensible
+cost/time estimate using REIQ's published figure (~2,000 member
+offices, stated as ~85% of all QLD agencies, implying ~2,353 total)
+combined with today's actual measured rates (2 of ~90 sites tested
+needed the Browserless fallback — a real ~2.2% rate — at a confirmed
+17 Browserless calls per JS-gated office from the live Nerang test).
+
+**Finding 1 — Browserless cost is a non-issue at this scale.** One
+full pass through all of QLD would use an estimated ~889 Browserless
+calls (~89% of the free tier's 1,000 units/month) — tight for one
+state on the free tier, but the $25/month Prototyping tier (20,000
+units) comfortably covers many states. Cost was never the real
+constraint once scoped as a small-minority fallback rather than a
+default.
+
+**Finding 2 — the real bottleneck was cron throughput, not cost.** At
+the original once-daily, 5-offices-per-run cron configuration, one
+complete pass through QLD's ~2,353 offices would take **~471 days** —
+over a year. This is the actual, urgent problem the cost calculation
+surfaced.
+
+**Fix**: switched the cron schedule from once-daily to **hourly**
+(`0 * * * *`), confirmed allowed on Vercel's free Hobby tier (the
+once-daily-only restriction has been relaxed; hourly is now the
+documented minimum cadence on Hobby, with Pro needed only for more
+frequent than hourly). At the same conservative batch size of 5
+offices per run, this cuts one full QLD pass from ~471 days to
+**~20 days** — a 24x improvement, at zero additional cost. Worth
+revisiting batch size too once hourly runs are confirmed stable in
+production, which would shorten this further (e.g. 15 offices/run
+hourly ≈ 6.5 days for a full QLD pass).
+
+**Correction**: the account running this is **Vercel Pro**, not
+Hobby — meaning per-minute cron cadence was available, not just
+hourly. Recalculated throughput options at Pro tier:
+
+| Cadence | Batch size | Time for full QLD pass |
+|---|---|---|
+| Hourly | 5 | ~20 days |
+| Every 15 min | 5 | ~5 days |
+| Every 15 min | 15 | **~1.6 days** ← chosen |
+| Every 5 min | 5 | ~1.6 days |
+| Every minute (Pro max) | 5 | ~8 hours |
+| Every minute (Pro max) | 30 | ~1.3 hours |
+
+**Deliberately did NOT choose the fastest option.** Running every
+minute would fire the cron 1,440 times/day — a fundamentally
+different load profile than hourly, with two real risks: (1)
+confirmed real 403/429 blocks already seen from some sites (Belle
+Property, McGrath) suggest aggressive request frequency risks getting
+entire franchises blocked outright, a worse outcome than slow
+progress; (2) genuinely slow Browserless-fallback offices (60+ seconds
+each) could risk overlapping function invocations at very tight
+cadences. Settled on **every 15 minutes, batch size 15** — each
+individual office is only touched once per ~1.6-day full cycle, not
+repeatedly in a short window, while still completing a full QLD pass
+in under two days. The existing time-budget/hard-timeout protections
+(`TIME_BUDGET_SECONDS=250`, `PER_OFFICE_TIMEOUT_SECONDS=60`) were
+confirmed to scale correctly to this larger batch size without any
+code changes — they operate on elapsed wall-clock time, independent
+of how many offices were requested in a batch.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style
