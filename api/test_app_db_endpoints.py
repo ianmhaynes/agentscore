@@ -17,6 +17,49 @@ import app as app_module
 client = app_module.app.test_client()
 
 
+def test_scrape_office_with_hard_timeout_cuts_off_genuinely_slow_sites():
+    """
+    Regression test for THE real cause of the Guardian Realty crash
+    (June 24, 2026): a single office can have many candidate pages to
+    visit (e.g. 17 listing pages confirmed real on another site), so
+    its TOTAL scrape time can exceed the function's time budget even
+    though every individual HTTP request has its own 20s timeout
+    (REQUEST_TIMEOUT in scraper.py) — no single request times out, but
+    the office as a whole does. The earlier "time budget between
+    offices" check couldn't catch this, since it only runs BEFORE
+    starting an office, not DURING one. This hard per-office timeout,
+    enforced via a background thread, is the real fix.
+    """
+    import time as time_module
+
+    def slow_scrape(domain, *args, **kwargs):
+        time_module.sleep(3)
+        return ([{"address": "should never be returned"}], None)
+
+    with patch.object(app_module, "scrape_office", side_effect=slow_scrape):
+        start = time_module.monotonic()
+        listings, error = app_module.scrape_office_with_hard_timeout("slow.com.au", timeout_seconds=1)
+        elapsed = time_module.monotonic() - start
+        assert elapsed < 2, f"Should return close to the 1s timeout, took {elapsed:.2f}s"
+        assert listings == []
+        assert "Timed out after 1s" in error
+    print("PASS: a genuinely slow scrape (many pages, no single request times out) is cut off "
+          "by the hard per-office timeout, instead of consuming the whole function's time budget")
+
+
+def test_scrape_office_with_hard_timeout_passes_through_fast_results():
+    """A normal, fast scrape should complete and return its real
+    result unmodified, well within the timeout."""
+    def fast_scrape(domain, *args, **kwargs):
+        return ([{"address": "1 Test St"}], None)
+
+    with patch.object(app_module, "scrape_office", side_effect=fast_scrape):
+        listings, error = app_module.scrape_office_with_hard_timeout("fast.com.au", timeout_seconds=60)
+        assert len(listings) == 1
+        assert error is None
+    print("PASS: a fast scrape completes normally and returns its real result")
+
+
 def test_seed_offices_adds_and_skips_correctly():
     with patch.object(app_module.db, "upsert_office", return_value=42) as mock_upsert:
         resp = client.post("/api/seed-offices", json={
@@ -176,6 +219,8 @@ def test_office_status_converts_datetimes_to_strings():
 
 
 if __name__ == "__main__":
+    test_scrape_office_with_hard_timeout_cuts_off_genuinely_slow_sites()
+    test_scrape_office_with_hard_timeout_passes_through_fast_results()
     test_seed_offices_adds_and_skips_correctly()
     test_seed_offices_requires_agencies()
     test_seed_offices_database_error_returns_clean_500()

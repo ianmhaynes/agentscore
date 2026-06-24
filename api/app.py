@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import threading
 
 # Ensure this file's own directory is importable regardless of the working
 # directory Vercel's runtime invokes it from — local `python3 app.py` from
@@ -110,6 +111,48 @@ def seed_offices():
     return jsonify({"added": added, "skipped_no_website": skipped})
 
 
+def scrape_office_with_hard_timeout(domain, timeout_seconds):
+    """
+    Runs scrape_office() with a HARD wall-clock timeout, using a daemon
+    thread — necessary because individual HTTP requests already have
+    their own 20-second timeout (REQUEST_TIMEOUT in scraper.py), but a
+    single office can have many candidate pages to visit (confirmed
+    real case: 17 candidate listing pages on one office), so the TOTAL
+    time for one office can exceed the whole cron function's time
+    budget even though no single request times out.
+
+    Confirmed real bug this fixes (June 24, 2026): Guardian Realty
+    caused an unhandled Vercel function timeout (not a Python
+    exception — Vercel kills the process outright), which our
+    in-Python time-budget check between offices couldn't catch, since
+    that check only runs BEFORE starting an office, not DURING one.
+
+    Returns (listings, error) same as scrape_office(), or
+    ([], "Timed out after Ns") if the timeout is hit. The background
+    thread is a daemon, so if it's still running when the function
+    returns, it won't block the process from completing — it will
+    simply be abandoned (its eventual result, if any, is discarded).
+    """
+    result = {"listings": [], "error": "Unknown — thread did not complete"}
+
+    def run():
+        try:
+            listings, error = scrape_office(domain)
+            result["listings"] = listings
+            result["error"] = error
+        except Exception as e:
+            result["listings"] = []
+            result["error"] = f"Unexpected error during scrape: {e}"
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout_seconds)
+
+    if thread.is_alive():
+        return [], f"Timed out after {timeout_seconds}s (office may be genuinely slow or unreachable)"
+    return result["listings"], result["error"]
+
+
 @app.route("/api/cron-scrape", methods=["GET", "POST"])
 def cron_scrape():
     """
@@ -142,6 +185,7 @@ def cron_scrape():
        by the next cron run.
     """
     TIME_BUDGET_SECONDS = 250  # stay under Vercel's 300s function limit
+    PER_OFFICE_TIMEOUT_SECONDS = 60  # hard cap per office; see scrape_office_with_hard_timeout
 
     limit = int(request.args.get("limit", 5))
     try:
@@ -162,13 +206,13 @@ def cron_scrape():
             continue
 
         try:
-            listings, error = scrape_office(office["domain"])
+            listings, error = scrape_office_with_hard_timeout(
+                office["domain"], timeout_seconds=PER_OFFICE_TIMEOUT_SECONDS
+            )
         except Exception as e:
-            # A genuinely unexpected exception from scrape_office()
-            # itself (not the clean (listings, error) tuple it normally
-            # returns) — confirmed possible via live testing. Record it
-            # as a per-office error and move on; do NOT let it crash
-            # the whole batch.
+            # Should be unreachable now that scrape_office_with_hard_timeout
+            # catches its own exceptions internally — kept as a final
+            # safety net in case the wrapper itself is ever changed.
             listings, error = [], f"Unexpected error during scrape: {e}"
 
         platform_detected = None
