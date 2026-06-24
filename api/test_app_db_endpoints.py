@@ -88,6 +88,69 @@ def test_cron_scrape_continues_after_one_office_db_write_fails():
     print("PASS: a DB write failure for one office doesn't abort the rest of the cron batch")
 
 
+def test_cron_scrape_survives_unexpected_exception_from_scrape_office():
+    """
+    Regression test for a real bug found via live testing (June 24,
+    2026): a known-slow site (Guardian Realty) caused an unhandled 500
+    that took down OTHER offices in the same cron batch that would
+    have scraped fine. scrape_office() can raise an exception we
+    haven't seen before, not just return its normal (listings, error)
+    tuple — this must be caught per-office, not crash the whole batch.
+    """
+    fake_offices = [
+        {"id": 1, "domain": "broken.com.au", "office_name": "Broken", "region": "Test"},
+        {"id": 2, "domain": "fine.com.au", "office_name": "Fine", "region": "Test"},
+    ]
+
+    def fake_scrape(domain, *args, **kwargs):
+        if domain == "broken.com.au":
+            raise ValueError("something genuinely unexpected blew up")
+        return ([{"address": "1 Test St", "source_adapter": "generic_fallback"}], None)
+
+    with patch.object(app_module.db, "get_offices_due_for_scraping", return_value=fake_offices), \
+         patch.object(app_module, "scrape_office", side_effect=fake_scrape), \
+         patch.object(app_module.db, "record_scrape_result"):
+        resp = client.get("/api/cron-scrape?limit=5")
+        body = resp.get_json()
+        assert resp.status_code == 200, "An unexpected exception in one office must not crash the whole request"
+        assert "Unexpected error during scrape" in body["scraped"][0]["error"]
+        assert body["scraped"][1]["listing_count"] == 1, "The second, unrelated office must still be processed correctly"
+    print("PASS: an unexpected exception from scrape_office() is caught per-office, batch continues")
+
+
+def test_cron_scrape_stops_gracefully_when_time_budget_exhausted():
+    """
+    The second real protection added alongside the exception handling
+    above: a wall-clock time budget check before each office, so a
+    cron run stops gracefully (marking remaining offices for retry
+    next time) rather than risk Vercel killing the function mid-
+    request, which would look identical to the original crash.
+    """
+    import time as time_module
+
+    fake_offices = [
+        {"id": 1, "domain": "first.com.au", "office_name": "First", "region": "Test"},
+        {"id": 2, "domain": "second.com.au", "office_name": "Second", "region": "Test"},
+    ]
+    call_iter = iter([0, 0, 260, 260])
+
+    def fake_monotonic():
+        try:
+            return next(call_iter)
+        except StopIteration:
+            return 260
+
+    with patch.object(app_module.db, "get_offices_due_for_scraping", return_value=fake_offices), \
+         patch.object(app_module, "scrape_office", return_value=([], None)), \
+         patch.object(app_module.db, "record_scrape_result"), \
+         patch.object(app_module.time, "monotonic", side_effect=fake_monotonic):
+        resp = client.get("/api/cron-scrape?limit=5")
+        body = resp.get_json()
+        assert resp.status_code == 200
+        assert "time budget exhausted" in body["scraped"][1]["error"]
+    print("PASS: the time budget check stops the batch gracefully once exhausted, instead of risking a timeout crash")
+
+
 def test_cron_scrape_database_fetch_error_returns_clean_500():
     with patch.object(app_module.db, "get_offices_due_for_scraping", side_effect=RuntimeError("db down")):
         resp = client.get("/api/cron-scrape")
@@ -117,6 +180,8 @@ if __name__ == "__main__":
     test_seed_offices_requires_agencies()
     test_seed_offices_database_error_returns_clean_500()
     test_cron_scrape_records_results_with_platform_detected()
+    test_cron_scrape_survives_unexpected_exception_from_scrape_office()
+    test_cron_scrape_stops_gracefully_when_time_budget_exhausted()
     test_cron_scrape_continues_after_one_office_db_write_fails()
     test_cron_scrape_database_fetch_error_returns_clean_500()
     test_office_status_converts_datetimes_to_strings()

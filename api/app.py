@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 
 # Ensure this file's own directory is importable regardless of the working
 # directory Vercel's runtime invokes it from — local `python3 app.py` from
@@ -125,16 +126,51 @@ def cron_scrape():
     simply take several days to work through a large backlog at this
     rate; that's an accepted tradeoff for staying within one function's
     timeout, not a bug.
+
+    TWO REAL PROTECTIONS against one slow/broken office crashing the
+    entire batch (found via live testing, June 24, 2026 — a known-slow
+    site, Guardian Realty, caused an unhandled 500 that took down
+    offices that would otherwise have scraped fine in the same batch):
+    1. scrape_office() itself is wrapped in try/except — it's possible
+       for it to raise an exception we haven't seen before, not just
+       return a clean (listings, error) tuple.
+    2. A wall-clock time budget (TIME_BUDGET_SECONDS) is checked before
+       starting each office. If we're already close to Vercel's
+       function timeout, we stop gracefully and return what we have so
+       far, rather than risk getting killed mid-request — any
+       not-yet-attempted offices simply remain "due" and get picked up
+       by the next cron run.
     """
+    TIME_BUDGET_SECONDS = 250  # stay under Vercel's 300s function limit
+
     limit = int(request.args.get("limit", 5))
     try:
         offices = db.get_offices_due_for_scraping(limit=limit)
     except Exception as e:
         return jsonify({"error": f"Database error while fetching due offices: {e}"}), 500
 
+    start_time = time.monotonic()
     results = []
     for office in offices:
-        listings, error = scrape_office(office["domain"])
+        elapsed = time.monotonic() - start_time
+        if elapsed > TIME_BUDGET_SECONDS:
+            results.append({
+                "domain": office["domain"],
+                "listing_count": 0,
+                "error": "Skipped — time budget exhausted, will retry on next cron run",
+            })
+            continue
+
+        try:
+            listings, error = scrape_office(office["domain"])
+        except Exception as e:
+            # A genuinely unexpected exception from scrape_office()
+            # itself (not the clean (listings, error) tuple it normally
+            # returns) — confirmed possible via live testing. Record it
+            # as a per-office error and move on; do NOT let it crash
+            # the whole batch.
+            listings, error = [], f"Unexpected error during scrape: {e}"
+
         platform_detected = None
         if listings:
             platform_detected = listings[0].get("source_adapter")
