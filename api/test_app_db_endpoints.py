@@ -13,8 +13,54 @@ from unittest.mock import patch
 
 sys.path.insert(0, ".")
 import app as app_module
+from scraper import Listing
 
 client = app_module.app.test_client()
+
+
+def test_scrape_office_with_hard_timeout_converts_listing_objects_to_dicts():
+    """
+    Regression test for THE actual real production crash (confirmed
+    via Vercel's function logs, June 24, 2026):
+        AttributeError: 'Listing' object has no attribute 'get'
+    scrape_office() returns a list of Listing DATACLASS INSTANCES, not
+    plain dicts — confirmed by checking scrape_offices() (the existing
+    working UI endpoint), which converts via
+    [asdict(l) for l in all_listings] before ever returning. Every new
+    endpoint added this session (cron-scrape, db.py's
+    record_scrape_result) wrongly assumed plain dicts. This crash was
+    NOT a timeout issue, despite every symptom (a generic Vercel 500,
+    no specific error visible without checking function logs directly)
+    looking exactly like the timeout bugs fixed earlier in this same
+    session — a real reminder that a generic 500 needs its actual
+    traceback checked, not just theorized about from symptoms alone.
+
+    This test also fixes a real gap in EVERY OTHER test in this file:
+    they previously used plain dicts to fake listings, which is why
+    this bug shipped to production without any test catching it —
+    asdict() only works on genuine dataclass instances, so a plain
+    dict fixture can never reproduce this exact failure.
+    """
+    real_listing = Listing(
+        address="123 Test St",
+        suburb="Newtown",
+        guide_price="500000",
+        status="active",
+        source_adapter="generic_fallback:reapit_agentbox_pattern",
+    )
+
+    def fake_scrape_returns_real_listing_objects(domain, *args, **kwargs):
+        return ([real_listing], None)
+
+    with patch.object(app_module, "scrape_office", side_effect=fake_scrape_returns_real_listing_objects):
+        listings, error = app_module.scrape_office_with_hard_timeout("test.com.au", timeout_seconds=10)
+        assert isinstance(listings[0], dict), f"FAIL: should be a plain dict, got {type(listings[0])}"
+        assert listings[0]["address"] == "123 Test St"
+        # This is the EXACT call that crashed in production — confirm it
+        # now works correctly rather than raising AttributeError
+        assert listings[0].get("source_adapter") == "generic_fallback:reapit_agentbox_pattern"
+    print("PASS: real Listing dataclass instances are correctly converted to plain dicts "
+          "(the actual real production crash, not a timeout issue)")
 
 
 def test_scrape_office_with_hard_timeout_cuts_off_genuinely_slow_sites():
@@ -34,7 +80,7 @@ def test_scrape_office_with_hard_timeout_cuts_off_genuinely_slow_sites():
 
     def slow_scrape(domain, *args, **kwargs):
         time_module.sleep(3)
-        return ([{"address": "should never be returned"}], None)
+        return ([Listing(address="should never be returned")], None)
 
     with patch.object(app_module, "scrape_office", side_effect=slow_scrape):
         start = time_module.monotonic()
@@ -51,7 +97,7 @@ def test_scrape_office_with_hard_timeout_passes_through_fast_results():
     """A normal, fast scrape should complete and return its real
     result unmodified, well within the timeout."""
     def fast_scrape(domain, *args, **kwargs):
-        return ([{"address": "1 Test St"}], None)
+        return ([Listing(address="1 Test St")], None)
 
     with patch.object(app_module, "scrape_office", side_effect=fast_scrape):
         listings, error = app_module.scrape_office_with_hard_timeout("fast.com.au", timeout_seconds=60)
@@ -97,7 +143,7 @@ def test_seed_offices_database_error_returns_clean_500():
 
 def test_cron_scrape_records_results_with_platform_detected():
     fake_offices = [{"id": 1, "domain": "example.com.au", "office_name": "Example", "region": "Test"}]
-    fake_listing = [{"address": "1 Test St", "source_adapter": "generic_fallback:reapit_agentbox_pattern"}]
+    fake_listing = [Listing(address="1 Test St", source_adapter="generic_fallback:reapit_agentbox_pattern")]
     with patch.object(app_module.db, "get_offices_due_for_scraping", return_value=fake_offices), \
          patch.object(app_module, "scrape_office", return_value=(fake_listing, None)) as mock_scrape, \
          patch.object(app_module.db, "record_scrape_result") as mock_record:
@@ -148,7 +194,7 @@ def test_cron_scrape_survives_unexpected_exception_from_scrape_office():
     def fake_scrape(domain, *args, **kwargs):
         if domain == "broken.com.au":
             raise ValueError("something genuinely unexpected blew up")
-        return ([{"address": "1 Test St", "source_adapter": "generic_fallback"}], None)
+        return ([Listing(address="1 Test St", source_adapter="generic_fallback")], None)
 
     with patch.object(app_module.db, "get_offices_due_for_scraping", return_value=fake_offices), \
          patch.object(app_module, "scrape_office", side_effect=fake_scrape), \
@@ -219,6 +265,7 @@ def test_office_status_converts_datetimes_to_strings():
 
 
 if __name__ == "__main__":
+    test_scrape_office_with_hard_timeout_converts_listing_objects_to_dicts()
     test_scrape_office_with_hard_timeout_cuts_off_genuinely_slow_sites()
     test_scrape_office_with_hard_timeout_passes_through_fast_results()
     test_seed_offices_adds_and_skips_correctly()

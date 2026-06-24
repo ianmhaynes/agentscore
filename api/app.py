@@ -13,6 +13,7 @@ from flask import Flask, request, jsonify, send_file
 import csv
 import io
 from datetime import date
+from dataclasses import asdict
 from scraper import scrape_offices, scrape_office
 from scoring import score_agents, summary_stats
 from discovery import discover_agencies
@@ -138,7 +139,23 @@ def scrape_office_with_hard_timeout(domain, timeout_seconds):
     def run():
         try:
             listings, error = scrape_office(domain)
-            result["listings"] = listings
+            # CONFIRMED REAL BUG (June 24, 2026): scrape_office() returns
+            # a list of Listing dataclass INSTANCES, not plain dicts —
+            # confirmed by checking scrape_offices() (the existing,
+            # working UI endpoint), which converts via
+            # [asdict(l) for l in all_listings] before returning. Every
+            # new endpoint added today (cron-scrape, and db.py's
+            # record_scrape_result) wrongly assumed plain dicts and
+            # called .get() on them, causing
+            # "AttributeError: 'Listing' object has no attribute 'get'"
+            # — a real crash found via Vercel's function logs, NOT a
+            # timeout issue despite every symptom looking exactly like
+            # one (a generic 500, no specific error visible without
+            # checking the logs directly). Converting here means every
+            # downstream caller (cron_scrape, db.record_scrape_result)
+            # always receives plain dicts, with no need to remember
+            # this conversion at each call site.
+            result["listings"] = [asdict(listing) for listing in listings]
             result["error"] = error
         except Exception as e:
             result["listings"] = []
