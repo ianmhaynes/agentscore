@@ -419,14 +419,33 @@ dedicated test: a normal working site is completely unaffected even
 WITH a key supplied, since the key only matters once plain HTTP has
 already failed completely).
 
-**NOT YET CONFIRMED LIVE** — this exact integration has not been run
-against the real Browserless API with a real token. The request shape
-is confirmed correct from Browserless's own current documentation, and
-the full pipeline (fetch → extract) has been verified with mocked
-responses matching that documented shape, but not end-to-end against
-the live API. Worth a real test against a confirmed LJ Hooker HubSpot
-office (e.g. `nerang.ljhooker.com.au`) before relying on this in
-production.
+**Critical real bug found via live testing (June 24, 2026)**: the
+Browserless fallback above was built entirely inside
+`GenericFallbackAdapter.fetch()` — but LJ Hooker sites are intercepted
+EARLIER in the adapter chain by the dedicated `LJHookerAdapter`, which
+had no Browserless support at all. The new fallback never even got a
+chance to run for the exact platform it was built to solve, confirmed
+via a real curl test against `nerang.ljhooker.com.au` showing
+`"Matched adapter: lj_hooker"` and zero listings, with no Browserless
+mention anywhere in the log. Fixed by adding the identical two-stage
+fallback (discovery, then detail pages) directly to `LJHookerAdapter`
+as well, at the exact point both its own confirmed discovery paths
+(own-subdomain search-results, officeId-based national fallback) are
+exhausted. Confirmed working end-to-end via a realistic test fixture
+matching this platform's actual confirmed structure — both discovery
+and detail-page extraction now succeed, with the EXISTING
+`itemprop="identifier"`/`itemprop="name"` parsing logic working
+completely unchanged once it actually receives real rendered content.
+
+**Still not yet confirmed against the REAL live Browserless API** —
+this exact integration has not been run with a real token. The
+request shape is confirmed correct from Browserless's own current
+documentation, and the full pipeline (fetch → extract, for both
+adapters now) has been verified with mocked responses matching that
+documented shape and this platform's confirmed real structure, but not
+end-to-end against the live API. Worth a real test against
+`nerang.ljhooker.com.au` with a genuine Browserless token before
+relying on this in production.
 
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 

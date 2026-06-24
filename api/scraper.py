@@ -473,6 +473,14 @@ class LJHookerAdapter:
 
     name = "lj_hooker"
 
+    def __init__(self, browserless_api_key=None):
+        # Same opt-in pattern as GenericFallbackAdapter — only used when
+        # both the own-subdomain and officeId-based discovery paths
+        # (both confirmed real, both genuinely fail for this platform
+        # generation, see class docstring) find nothing at all.
+        self.browserless_api_key = browserless_api_key
+        self.browserless_call_count = 0
+
     def detect(self, html):
         # IMPORTANT: detect() runs against the HOMEPAGE, which is a
         # separate, HubSpot-powered marketing shell — confirmed via live
@@ -664,21 +672,60 @@ class LJHookerAdapter:
                     "JS-loaded platform with no server-rendered listing data)")
 
         if not listing_urls:
-            log("  No listing URLs found via any known search-results pattern")
-            return []
+            if not self.browserless_api_key:
+                log("  No listing URLs found via any known search-results pattern")
+                return []
+
+            # LAST RESORT (June 24, 2026): both known discovery paths
+            # are confirmed genuinely empty for this platform generation
+            # (HubSpot homepage shell, JS-loaded search-results page —
+            # see class docstring for full confirmation history). Try
+            # the homepage's JS-RENDERED version via Browserless.
+            log("  Both known discovery patterns found nothing via plain HTTP — "
+                "trying Browserless (JS-rendered) as a last resort...")
+            rendered_html = browserless_fallback.fetch_rendered_html(
+                domain, self.browserless_api_key, log=log,
+            )
+            if not rendered_html:
+                log("  Browserless fallback also found nothing usable — giving up on this office")
+                return []
+
+            self.browserless_call_count += 1
+            found = self._collect_listing_urls(rendered_html, domain)
+            if not found:
+                log("  Browserless returned rendered HTML, but no candidate listing URLs "
+                    "were found in it either")
+                return []
+            log(f"  Browserless (JS-rendered homepage): found {len(found)} listing URL(s)")
+            listing_urls.update(found)
+            needed_browserless = True
+        else:
+            needed_browserless = False
 
         log(f"  Visiting {len(listing_urls)} listing page(s)"
             f"{' (via officeId fallback)' if used_fallback else ''}...")
         listings = []
         for listing_url in listing_urls:
-            try:
-                resp = session.get(listing_url, timeout=REQUEST_TIMEOUT)
-            except requests.RequestException as e:
-                log(f"    ERROR fetching {listing_url}: {e}")
+            html = None
+            if needed_browserless:
+                html = browserless_fallback.fetch_rendered_html(
+                    listing_url, self.browserless_api_key, log=log,
+                )
+                if html:
+                    self.browserless_call_count += 1
+            else:
+                try:
+                    resp = session.get(listing_url, timeout=REQUEST_TIMEOUT)
+                except requests.RequestException as e:
+                    log(f"    ERROR fetching {listing_url}: {e}")
+                    continue
+                if resp.status_code != 200:
+                    continue
+                html = resp.text
+
+            if not html:
                 continue
-            if resp.status_code != 200:
-                continue
-            parsed = self._parse_detail_page(resp.text, listing_url, domain, log)
+            parsed = self._parse_detail_page(html, listing_url, domain, log)
             if parsed:
                 listings.append(parsed)
             time.sleep(0.3)
@@ -1090,7 +1137,7 @@ def _build_adapters(llm_api_key=None, browserless_api_key=None):
     return [
         RayWhiteDynamicsAdapter(),
         CloudhiRexAdapter(),
-        LJHookerAdapter(),
+        LJHookerAdapter(browserless_api_key=browserless_api_key),
         GenericFallbackAdapter(llm_api_key=llm_api_key, browserless_api_key=browserless_api_key),
     ]
 

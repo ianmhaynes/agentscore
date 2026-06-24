@@ -215,6 +215,73 @@ def test_neither_path_works_returns_empty_gracefully():
         scraper_module.requests.Session = original_session
 
 
+def test_browserless_fallback_solves_the_confirmed_real_gap():
+    """
+    Confirmed real fix (June 24, 2026) for the exact, documented
+    limitation in this adapter's class docstring: when both the own-
+    subdomain and officeId-based discovery paths find nothing (the
+    genuinely JS-loaded HubSpot platform generation), a supplied
+    browserless_api_key triggers a JS-rendered fetch of the homepage,
+    which finds real listing links; individual listing pages on that
+    same site are then ALSO fetched via Browserless (a site whose
+    listing LINKS only exist after JS runs is a strong signal its
+    listing DATA works the same way), and the existing
+    _parse_detail_page logic (itemprop="identifier"/"name" schema
+    markup) extracts real address/price/status from the rendered HTML
+    completely unchanged — confirming the existing parser works fine
+    once it actually receives real content to parse.
+    """
+    import scraper as scraper_module
+    from unittest.mock import patch
+
+    class FakeResponse:
+        def __init__(self, text, status_code=200):
+            self.text = text
+            self.status_code = status_code
+
+    placeholder_search_results = "<html><body>#### listing item #### listing item</body></html>"
+    homepage_no_officeid = "<html><body>ljhooker searchProfile= homepage, no officeId anywhere</body></html>"
+
+    class FakeSessionRealLJHookerShape:
+        def __init__(self):
+            self.headers = {}
+        def get(self, url, timeout=None):
+            if "search-results" in url:
+                return FakeResponse(placeholder_search_results)
+            return FakeResponse(homepage_no_officeid)
+
+    rendered_homepage = '<a href="https://property.ljhooker.com.au/listing/real-listing-123">Listing</a>'
+    rendered_detail = """
+    <section itemscope itemtype="https://schema.org/IndividualProduct">
+    <h2 class="property-overview__address" itemprop="name">12 Test St, Nerang QLD</h2>
+    <p itemprop="identifier">Sold For $650,000</p>
+    </section>
+    """
+
+    def fake_browserless_fetch(url, api_token, log=None):
+        if "property.ljhooker" in url:
+            return rendered_detail
+        return rendered_homepage
+
+    original_session = scraper_module.requests.Session
+    scraper_module.requests.Session = FakeSessionRealLJHookerShape
+    try:
+        adapter = LJHookerAdapter(browserless_api_key="fake-token")
+        with patch.object(scraper_module.browserless_fallback, "fetch_rendered_html", side_effect=fake_browserless_fetch):
+            logs = []
+            listings = adapter.fetch("https://nerang.ljhooker.com.au", log=logs.append)
+            assert len(listings) == 1, f"FAIL: expected 1 real listing, got {len(listings)}"
+            listing = listings[0]
+            assert listing.status == "Sold"
+            assert listing.sold_price == "650000"
+            assert "Nerang" in listing.address
+            assert adapter.browserless_call_count == 2
+    finally:
+        scraper_module.requests.Session = original_session
+    print("PASS: Browserless fallback solves the confirmed real gap for LJ Hooker's "
+          "HubSpot platform generation — discovery AND detail-page extraction both work")
+
+
 if __name__ == "__main__":
     test_adapter_registered_before_generic_fallback()
     test_detect()
@@ -223,4 +290,5 @@ if __name__ == "__main__":
     test_full_fetch_via_own_subdomain_no_office_id_needed()
     test_full_fetch_falls_back_to_office_id_when_own_subdomain_empty()
     test_neither_path_works_returns_empty_gracefully()
+    test_browserless_fallback_solves_the_confirmed_real_gap()
     print("\nAll LJ Hooker adapter tests passed.")
