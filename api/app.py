@@ -112,7 +112,7 @@ def seed_offices():
     return jsonify({"added": added, "skipped_no_website": skipped})
 
 
-def scrape_office_with_hard_timeout(domain, timeout_seconds):
+def scrape_office_with_hard_timeout(domain, timeout_seconds, browserless_api_key=None):
     """
     Runs scrape_office() with a HARD wall-clock timeout, using a daemon
     thread — necessary because individual HTTP requests already have
@@ -138,7 +138,7 @@ def scrape_office_with_hard_timeout(domain, timeout_seconds):
 
     def run():
         try:
-            listings, error = scrape_office(domain)
+            listings, error = scrape_office(domain, browserless_api_key=browserless_api_key)
             # CONFIRMED REAL BUG (June 24, 2026): scrape_office() returns
             # a list of Listing dataclass INSTANCES, not plain dicts —
             # confirmed by checking scrape_offices() (the existing,
@@ -224,7 +224,9 @@ def cron_scrape():
 
         try:
             listings, error = scrape_office_with_hard_timeout(
-                office["domain"], timeout_seconds=PER_OFFICE_TIMEOUT_SECONDS
+                office["domain"],
+                timeout_seconds=PER_OFFICE_TIMEOUT_SECONDS,
+                browserless_api_key=os.environ.get("BROWSERLESS_API_KEY"),
             )
         except Exception as e:
             # Should be unreachable now that scrape_office_with_hard_timeout
@@ -289,12 +291,20 @@ def scrape():
     # as the Google Places API key in /api/discover.
     llm_api_key = data.get("llmApiKey", "").strip() or None
 
+    # Optional — only used as a LAST RESORT when every plain-HTTP
+    # candidate path finds zero listing URLs at all (confirmed real
+    # need: LJ Hooker's HubSpot platform generation, June 2026). Same
+    # per-request, never-stored pattern as the other two keys above.
+    browserless_api_key = data.get("browserlessApiKey", "").strip() or None
+
     log_lines = []
 
     def log(msg):
         log_lines.append(msg)
 
-    result = scrape_offices(urls, log=log, llm_api_key=llm_api_key)
+    result = scrape_offices(
+        urls, log=log, llm_api_key=llm_api_key, browserless_api_key=browserless_api_key,
+    )
     result["log"] = log_lines
 
     return jsonify(result)

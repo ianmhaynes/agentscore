@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, asdict
 from urllib.parse import urlparse
 import requests
 import extraction_tiers
+import browserless_fallback
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -741,7 +742,7 @@ class GenericFallbackAdapter:
         "/buying/recently-sold",
     ]
 
-    def __init__(self, llm_api_key=None):
+    def __init__(self, llm_api_key=None, browserless_api_key=None):
         # Optional — if not supplied, the LLM tier is simply skipped
         # (extraction_tiers.extract_listing_fields handles this
         # gracefully). Passed in per-instance rather than read from an
@@ -749,6 +750,14 @@ class GenericFallbackAdapter:
         # (key entered in the UI, sent per-request, never stored) holds.
         self.llm_api_key = llm_api_key
         self.llm_call_count = 0  # for real cost measurement, see README
+        # Same opt-in pattern: Browserless's JS-rendering fallback is
+        # only used when a key is supplied AND every plain-HTTP path
+        # has already failed to find any candidate listing URLs at
+        # all. Confirmed real, small minority of sites need this
+        # (~2% across ~90 sites tested) — see browserless_fallback.py
+        # module docstring for the full cost reasoning.
+        self.browserless_api_key = browserless_api_key
+        self.browserless_call_count = 0
 
     def detect(self, html):
         # Deliberately always matches — this is the catch-all, tried only
@@ -988,28 +997,77 @@ class GenericFallbackAdapter:
             time.sleep(0.3)
 
         if not listing_urls:
-            log("  No listing index page matched any known path pattern — "
-                "this site's structure is not covered by the generic fallback")
-            return []
+            if not self.browserless_api_key:
+                log("  No listing index page matched any known path pattern — "
+                    "this site's structure is not covered by the generic fallback")
+                return []
+
+            # LAST RESORT: every plain-HTTP path found nothing. Try the
+            # homepage's JS-RENDERED version via Browserless — confirmed
+            # real use case (LJ Hooker's HubSpot platform, June 2026):
+            # the homepage's REAL listing links only exist after
+            # JavaScript runs, invisible to every plain-HTTP fetch no
+            # matter which path is tried.
+            log("  No listing index page matched any known path pattern via plain HTTP — "
+                "trying Browserless (JS-rendered) as a last resort...")
+            rendered_html = browserless_fallback.fetch_rendered_html(
+                domain, self.browserless_api_key, log=log,
+            )
+            if not rendered_html:
+                log("  Browserless fallback also found nothing usable — giving up on this office")
+                return []
+
+            self.browserless_call_count += 1
+            found = self._collect_listing_urls(rendered_html, domain)
+            if not found:
+                log("  Browserless returned rendered HTML, but no candidate listing URLs "
+                    "were found in it either — this site's structure is genuinely not "
+                    "covered, not just hidden behind JavaScript")
+                return []
+            log(f"  Browserless (JS-rendered homepage): found {len(found)} candidate listing URL(s)")
+            listing_urls.update(found)
+            # A site whose LISTING LINKS only exist after JS runs is a
+            # strong real signal that its listing DATA likely works the
+            # same way — confirmed true for LJ Hooker's HubSpot
+            # platform (checked the dedicated search-results page
+            # directly; still only placeholder text in plain HTML).
+            # Tracked so the detail-page loop below knows to use
+            # Browserless from the start rather than wastefully trying
+            # plain HTTP first and failing every single time.
+            needed_browserless_for_discovery = True
+        else:
+            needed_browserless_for_discovery = False
 
         log(f"  Visiting {len(listing_urls)} candidate listing page(s)...")
         listings = []
         for listing_url in listing_urls:
-            try:
-                resp = session.get(listing_url, timeout=REQUEST_TIMEOUT)
-            except requests.RequestException as e:
-                log(f"    ERROR fetching {listing_url}: {e}")
+            html = None
+            if needed_browserless_for_discovery:
+                html = browserless_fallback.fetch_rendered_html(
+                    listing_url, self.browserless_api_key, log=log,
+                )
+                if html:
+                    self.browserless_call_count += 1
+            else:
+                try:
+                    resp = session.get(listing_url, timeout=REQUEST_TIMEOUT)
+                except requests.RequestException as e:
+                    log(f"    ERROR fetching {listing_url}: {e}")
+                    continue
+                if resp.status_code != 200:
+                    # CONFIRMED REAL BUG (June 23, 2026): this case was
+                    # previously silent — no log line at all — which hid
+                    # the real cause of traversgray.com.au returning 0
+                    # parsed listings for an entire debugging session. Now
+                    # logged explicitly so a non-200 response is visible
+                    # rather than indistinguishable from "parsing failed".
+                    log(f"    {listing_url} returned HTTP {resp.status_code}, skipping")
+                    continue
+                html = resp.text
+
+            if not html:
                 continue
-            if resp.status_code != 200:
-                # CONFIRMED REAL BUG (June 23, 2026): this case was
-                # previously silent — no log line at all — which hid
-                # the real cause of traversgray.com.au returning 0
-                # parsed listings for an entire debugging session. Now
-                # logged explicitly so a non-200 response is visible
-                # rather than indistinguishable from "parsing failed".
-                log(f"    {listing_url} returned HTTP {resp.status_code}, skipping")
-                continue
-            parsed = self._parse_detail_page(resp.text, listing_url, domain, log)
+            parsed = self._parse_detail_page(html, listing_url, domain, log)
             if parsed:
                 listings.append(parsed)
             time.sleep(0.2)
@@ -1019,23 +1077,25 @@ class GenericFallbackAdapter:
         return listings
 
 
-def _build_adapters(llm_api_key=None):
+def _build_adapters(llm_api_key=None, browserless_api_key=None):
     """
     Built per-call rather than as a single module-level constant so each
     request can supply its own LLM API key (same pattern as the Google
     Places key in discovery.py — entered in the UI, sent per-request,
     never stored server-side). When no key is supplied, GenericFallback
     Adapter still works exactly as before, just without tier 4 (LLM).
+    Same pattern for browserless_api_key — without it, the JS-rendering
+    fallback in GenericFallbackAdapter.fetch() is simply skipped.
     """
     return [
         RayWhiteDynamicsAdapter(),
         CloudhiRexAdapter(),
         LJHookerAdapter(),
-        GenericFallbackAdapter(llm_api_key=llm_api_key),
+        GenericFallbackAdapter(llm_api_key=llm_api_key, browserless_api_key=browserless_api_key),
     ]
 
 
-def scrape_office(raw_url, log=print, llm_api_key=None):
+def scrape_office(raw_url, log=print, llm_api_key=None, browserless_api_key=None):
     """
     Scrape a single office. Tries each adapter's detect() against the
     homepage HTML; uses the first that matches. Returns (listings, error).
@@ -1076,7 +1136,7 @@ def scrape_office(raw_url, log=print, llm_api_key=None):
     if resp.status_code != 200:
         return [], f"Site returned HTTP {resp.status_code}"
 
-    adapters = _build_adapters(llm_api_key=llm_api_key)
+    adapters = _build_adapters(llm_api_key=llm_api_key, browserless_api_key=browserless_api_key)
     matched_adapter = None
     for adapter in adapters:
         if adapter.detect(resp.text):
@@ -1111,7 +1171,7 @@ def scrape_office(raw_url, log=print, llm_api_key=None):
         try:
             www_resp = session.get(www_domain, timeout=REQUEST_TIMEOUT)
             if www_resp.status_code == 200:
-                www_adapters = _build_adapters(llm_api_key=llm_api_key)
+                www_adapters = _build_adapters(llm_api_key=llm_api_key, browserless_api_key=browserless_api_key)
                 www_matched = None
                 for adapter in www_adapters:
                     if adapter.detect(www_resp.text):
@@ -1128,7 +1188,7 @@ def scrape_office(raw_url, log=print, llm_api_key=None):
     return listings, None
 
 
-def scrape_offices(urls, log=print, llm_api_key=None):
+def scrape_offices(urls, log=print, llm_api_key=None, browserless_api_key=None):
     """Scrape a list of office URLs. Returns dict with results + per-office status."""
     all_listings = []
     office_results = []
@@ -1138,7 +1198,9 @@ def scrape_offices(urls, log=print, llm_api_key=None):
         raw_url = raw_url.strip()
         if not raw_url:
             continue
-        listings, error = scrape_office(raw_url, log=log, llm_api_key=llm_api_key)
+        listings, error = scrape_office(
+            raw_url, log=log, llm_api_key=llm_api_key, browserless_api_key=browserless_api_key,
+        )
         office_results.append({
             "url": raw_url,
             "success": error is None,

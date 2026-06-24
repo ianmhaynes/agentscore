@@ -334,6 +334,10 @@ raywhitesurfersparadise.com.au"></textarea>
     <input type="password" id="llmApiKey" placeholder="Only used as a last resort, for sites no free rule recognizes" style="width: 100%; font-family: 'JetBrains Mono', monospace; font-size: 13px; padding: 12px 14px; border: 1px solid var(--rule); border-radius: 2px; background: var(--paper-dim); color: var(--ink); box-sizing: border-box;" />
     <div class="hint">When a site doesn't match any known platform or free extraction rule (JSON-LD, meta tags, known templates), this sends that one listing page to an LLM as a true last resort. Costs roughly $0.001\u2013$0.005 per listing that reaches this tier — most listings never will, since the free rules catch a lot. Leave blank to skip this tier entirely. Your key is sent only to this app's own server for this request, never stored.</div>
 
+    <label class="field-label" for="browserlessApiKey" style="margin-top: 14px;">Browserless API key (optional — JS-rendering fallback, has real cost)</label>
+    <input type="password" id="browserlessApiKey" placeholder="Only used when a site's listing links are invisible to plain HTTP" style="width: 100%; font-family: 'JetBrains Mono', monospace; font-size: 13px; padding: 12px 14px; border: 1px solid var(--rule); border-radius: 2px; background: var(--paper-dim); color: var(--ink); box-sizing: border-box;" />
+    <div class="hint">Confirmed real need: some sites (e.g. LJ Hooker's HubSpot platform) load all listing links and data via JavaScript, invisible to every plain-HTTP request no matter which page is tried. This renders the page through a real headless browser as a true last resort, only when every plain-HTTP path finds nothing at all. Browserless's free tier (1,000 units/month) covers this comfortably as a small-minority fallback. Leave blank to skip this tier entirely. Your key is sent only to this app's own server for this request, never stored.</div>
+
     <div class="actions">
       <button class="primary" id="scrapeBtn" onclick="runScrape()">Scrape listings</button>
       <span class="status-line" id="statusLine"></span>
@@ -371,7 +375,7 @@ let discoveredAgencies = [];
 // try/catch since localStorage can throw in some private-browsing
 // modes or if disabled — in that case the keys simply won't persist,
 // which is a silent, harmless degradation rather than a broken page.
-const API_KEY_FIELDS = ['discoverApiKey', 'llmApiKey'];
+const API_KEY_FIELDS = ['discoverApiKey', 'llmApiKey', 'browserlessApiKey'];
 
 function loadSavedApiKeys() {
   for (const fieldId of API_KEY_FIELDS) {
@@ -565,7 +569,11 @@ async function runScrape() {
       const resp = await fetch('/api/scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: batch, llmApiKey: document.getElementById('llmApiKey').value.trim() })
+        body: JSON.stringify({
+          urls: batch,
+          llmApiKey: document.getElementById('llmApiKey').value.trim(),
+          browserlessApiKey: document.getElementById('browserlessApiKey').value.trim(),
+        })
       });
       const data = await resp.json();
 

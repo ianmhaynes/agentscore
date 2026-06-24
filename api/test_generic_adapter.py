@@ -3,6 +3,7 @@ catch-all adapter, built from live inspection of Belle Property (June 2026)
 but designed to be tried broadly across unrecognized agency sites."""
 import sys
 sys.path.insert(0, ".")
+import scraper as scraper_module
 from scraper import GenericFallbackAdapter, _build_adapters, RayWhiteDynamicsAdapter, CloudhiRexAdapter
 
 
@@ -403,6 +404,89 @@ def test_listing_url_heuristic_real_world_confirmed_urls():
           "URL styles, and rejects 4 real nav/category pages that previously caused a live bug")
 
 
+def test_browserless_fallback_triggers_only_when_plain_http_finds_nothing():
+    """
+    Confirmed real use case (LJ Hooker's HubSpot platform generation,
+    June 24, 2026): the homepage's real listing links only exist after
+    JavaScript runs — invisible to every plain-HTTP candidate path no
+    matter which one is tried. When a browserless_api_key is supplied
+    AND every plain-HTTP path finds zero candidates, the fallback
+    fetches the JS-rendered homepage via Browserless and tries
+    discovery again on that rendered HTML.
+    """
+    from unittest.mock import patch
+
+    class FakeResponse:
+        def __init__(self, text, status_code=200):
+            self.text = text
+            self.status_code = status_code
+
+    class FakeSessionAllEmpty:
+        def __init__(self):
+            self.headers = {}
+        def get(self, url, timeout=None):
+            return FakeResponse("<html><body>no real links here</body></html>")
+
+    rendered_html = """
+    <html><body>
+    <a href="https://example.com/123-test-street-suburb-456789">Listing 1</a>
+    </body></html>
+    """
+
+    original_session = scraper_module.requests.Session
+    scraper_module.requests.Session = FakeSessionAllEmpty
+    try:
+        adapter = GenericFallbackAdapter(browserless_api_key="fake-token")
+        with patch.object(scraper_module.browserless_fallback, "fetch_rendered_html", return_value=rendered_html):
+            logs = []
+            listings = adapter.fetch("https://example.com", log=logs.append)
+            assert any("trying Browserless" in l for l in logs)
+            assert adapter.browserless_call_count >= 1
+    finally:
+        scraper_module.requests.Session = original_session
+    print("PASS: Browserless fallback correctly triggers only when plain HTTP finds zero candidates")
+
+
+def test_browserless_not_triggered_for_normal_working_sites():
+    """The 98% case: a site plain HTTP already handles correctly must
+    be completely unaffected by this feature, even when a
+    browserless_api_key IS supplied — Browserless should never even
+    be considered if plain HTTP already found candidates."""
+    class FakeResponse:
+        def __init__(self, text, status_code=200):
+            self.text = text
+            self.status_code = status_code
+
+    real_homepage = '<a href="https://example.com/123-test-street-suburb-456789">Listing 1</a>'
+    real_detail = '<h1 class="address">123 Test Street, Suburb</h1><div class="price">$750,000</div>'
+
+    class FakeSessionNormalSite:
+        def __init__(self):
+            self.headers = {}
+        def get(self, url, timeout=None):
+            if url == "https://example.com":
+                return FakeResponse(real_homepage)
+            return FakeResponse(real_detail)
+
+    original_session = scraper_module.requests.Session
+    scraper_module.requests.Session = FakeSessionNormalSite
+    try:
+        # Note: browserless_api_key IS supplied here, to specifically
+        # confirm it's the zero-candidates CONDITION that matters, not
+        # merely the absence of a key
+        adapter = GenericFallbackAdapter(browserless_api_key="fake-token")
+        logs = []
+        listings = adapter.fetch("https://example.com", log=logs.append)
+        assert len(listings) == 1
+        assert not any("Browserless" in l for l in logs), (
+            "Browserless should never be mentioned for a site plain HTTP already handles"
+        )
+        assert adapter.browserless_call_count == 0
+    finally:
+        scraper_module.requests.Session = original_session
+    print("PASS: a normal working site is completely unaffected, even with a Browserless key supplied")
+
+
 if __name__ == "__main__":
     test_adapter_order_generic_is_last()
     test_detect_always_true()
@@ -420,4 +504,6 @@ if __name__ == "__main__":
     test_other_real_url_styles_unaffected_by_protocol_relative_fix()
     test_listing_url_heuristic_accepts_bare_numeric_id_urls()
     test_listing_url_heuristic_real_world_confirmed_urls()
+    test_browserless_fallback_triggers_only_when_plain_http_finds_nothing()
+    test_browserless_not_triggered_for_normal_working_sites()
     print("\nAll generic fallback adapter tests passed.")

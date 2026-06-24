@@ -348,6 +348,86 @@ real API costs on a sufficiently broad query. Includes the documented
 next page too quickly can fail even with a token that works correctly
 moments later.
 
+## LJ Hooker — two confirmed platform generations, definitively resolved
+
+Confirmed via direct fetch of two real offices on this generation
+(Nerang, Southern Gold Coast — June 24, 2026): the HubSpot-powered LJ
+Hooker platform generation has **zero server-rendered listing data
+anywhere**, not just on the homepage. Checked the dedicated
+`/search-results?searchProfile=sold&...` page directly (the real,
+confirmed URL pattern, found in the page's own footer links) and it
+still shows only literal placeholder text (`#### listing item`,
+repeated once per expected card) with no real data behind it — the
+listings are loaded entirely client-side after the page renders. This
+is a genuine, permanent dead end for a plain-HTTP approach, not a gap
+needing a different URL or path — there is no URL on this platform
+generation that returns real listing data without executing JavaScript.
+
+This is DIFFERENT from the Pyrmont LJ Hooker office confirmed working
+at the very start of this project (real Schema.org markup, fully
+server-rendered) — LJ Hooker runs at least two distinct underlying
+website platforms across its franchise network, and only one is
+reachable without a browser. No way to distinguish which platform
+generation a given office is on without checking directly (no
+consistent URL/domain signal found so far); this remains a per-office
+judgment call.
+
+## Browserless JS-rendering fallback (June 24, 2026) — revisiting an earlier "no" with real data
+
+Two earlier sessions explicitly declined Playwright/browser rendering
+for cost reasons — but that reasoning assumed running it for EVERY
+scrape by default. After confirming via real testing across ~90 sites
+that genuinely JS-gated platforms are a small minority (~2%: LJ
+Hooker's HubSpot generation, BresicWhitney's Rex CRM delivery layer),
+the actual cost as a FALLBACK ONLY (triggered exclusively when every
+plain-HTTP path finds zero candidates) is small enough to fit
+comfortably inside Browserless's free tier (1,000 units/month) even at
+meaningfully larger scale. This is a genuine update to an earlier
+decision based on new evidence, not a reversal of the underlying
+reasoning — see `browserless_fallback.py`'s module docstring for the
+full cost analysis.
+
+**How it works**: Vercel's serverless Python functions cannot run a
+real Chrome binary locally — Browserless runs the actual headless
+browser on its own infrastructure, reached via a plain HTTP POST to
+its `/content` REST endpoint (confirmed correct from Browserless's own
+current documentation, June 2026), which returns fully JS-rendered
+HTML as a plain string. That HTML is fed through the EXACT SAME
+`extraction_tiers.py` pipeline used everywhere else — no separate
+parsing logic, since once JavaScript has run, the result is still
+just HTML.
+
+**Two-stage fallback** in `GenericFallbackAdapter.fetch()`:
+1. If every plain-HTTP candidate path finds zero listing URLs at all,
+   fetch the JS-rendered homepage via Browserless and try discovery
+   again on that rendered HTML.
+2. If that succeeded, a site whose LISTING LINKS only exist after JS
+   runs is a strong real signal that its listing DATA likely works the
+   same way (confirmed true for LJ Hooker's HubSpot platform — checked
+   the dedicated search-results page directly, still only placeholder
+   text in plain HTML) — so individual listing detail pages on that
+   same site are also fetched via Browserless, rather than wastefully
+   trying plain HTTP first and failing every single time.
+
+**Opt-in, same pattern as the LLM key**: a `browserlessApiKey` field
+in the UI, sent per-request, never stored server-side. The daily cron
+job reads a `BROWSERLESS_API_KEY` environment variable instead, since
+there's no per-request UI for a scheduled job. Without a key supplied
+either way, this tier is simply skipped — zero behavior change for
+every site that already works via plain HTTP (confirmed via a
+dedicated test: a normal working site is completely unaffected even
+WITH a key supplied, since the key only matters once plain HTTP has
+already failed completely).
+
+**NOT YET CONFIRMED LIVE** — this exact integration has not been run
+against the real Browserless API with a real token. The request shape
+is confirmed correct from Browserless's own current documentation, and
+the full pipeline (fetch → extract) has been verified with mocked
+responses matching that documented shape, but not end-to-end against
+the live API. Worth a real test against a confirmed LJ Hooker HubSpot
+office (e.g. `nerang.ljhooker.com.au`) before relying on this in
+production.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style
