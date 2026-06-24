@@ -282,6 +282,56 @@ def test_browserless_fallback_solves_the_confirmed_real_gap():
           "HubSpot platform generation — discovery AND detail-page extraction both work")
 
 
+def test_real_nerang_page_parsed_correctly_no_nav_bar_collision():
+    """
+    Regression test for TWO real bugs found via raw HTML from
+    Browserless against a real, currently-live listing (90 Mortensen
+    Road, Nerang QLD, June 24, 2026):
+      1. The page's NAV BAR has its own itemprop="name" element
+         (<a href=".../buy" itemprop="url"><span itemprop="name">Buy
+         </span></a>), which appeared EARLIER in the document than the
+         real address heading and was wrongly matched first, causing
+         every single listing to show address="Buy".
+      2. The real <p itemprop="identifier"> can be PLAIN "SOLD" with
+         no price attached at all (a real case where LJ Hooker doesn't
+         publish a final sold price) — the original status regex
+         required a $ amount in the same match, so it fell through to
+         a fallback that, combined with bug 1, never found the real
+         data at all.
+    Fixture is the EXACT real raw HTML confirmed via a direct curl call
+    to Browserless's /content API against the live site.
+    """
+    import scraper as scraper_module
+
+    real_raw_html = """
+    <a href="https://ljhooker.com.au/buy" itemprop="url"><span itemprop="name">Buy</span></a>
+    <option value="buy" selected="">Buy</option>
+    <option value="sold">Sold</option>
+    <a href="https://nerang.ljhooker.com.au/search-results?officeId=84" class="property-header__navigation__item">Sold</a>
+    <span class="property-gallery__sticker property-gallery__sticker--sold" itemprop="keywords">Sold</span>
+    <h2 class="property-overview__address" itemprop="name">90 Mortensen Road, Nerang</h2>
+    <p id="property-information" class="property-overview__status" itemprop="identifier">SOLD</p>
+    <a href="#" class="property-sidebar__panel__item">SOLD</a>
+    """
+
+    adapter = LJHookerAdapter()
+    result = adapter._parse_detail_page(
+        real_raw_html,
+        "https://property.ljhooker.com.au/residential-nerang-qld-house-90-mortensen-road-5hkwf41",
+        "https://nerang.ljhooker.com.au",
+        print,
+    )
+    assert result is not None
+    assert result.address == "90 Mortensen Road, Nerang", (
+        f"FAIL: got {result.address!r} — likely matched the nav bar's Buy link again"
+    )
+    assert result.status == "Sold"
+    assert result.sold_price == "", "This real listing genuinely has no published sold price"
+    assert result.suburb == "Nerang", f"FAIL: got {result.suburb!r}"
+    print("PASS: real Nerang page structure correctly parsed — no nav-bar collision, "
+          "plain SOLD with no price handled correctly, no-state-suffix suburb extracted correctly")
+
+
 if __name__ == "__main__":
     test_adapter_registered_before_generic_fallback()
     test_detect()
@@ -291,4 +341,5 @@ if __name__ == "__main__":
     test_full_fetch_falls_back_to_office_id_when_own_subdomain_empty()
     test_neither_path_works_returns_empty_gracefully()
     test_browserless_fallback_solves_the_confirmed_real_gap()
+    test_real_nerang_page_parsed_correctly_no_nav_bar_collision()
     print("\nAll LJ Hooker adapter tests passed.")

@@ -524,12 +524,38 @@ class LJHookerAdapter:
         return urls
 
     def _parse_detail_page(self, html, listing_url, domain, log):
+        # CONFIRMED REAL BUGS (June 24, 2026), found via raw HTML from
+        # Browserless against a real, currently-live listing
+        # (90 Mortensen Road, Nerang QLD):
+        #   1. The real <p itemprop="identifier"> can be PLAIN "SOLD"
+        #      with no price attached at all — confirmed real case
+        #      where LJ Hooker doesn't publish a final sold price. The
+        #      original regex required a $ amount in the same match,
+        #      which made this fail and fall through to a much looser
+        #      fallback regex that, combined with bug 2, matched the
+        #      wrong content entirely.
+        #   2. The page's NAV BAR has its own itemprop="name" element —
+        #      <a href=".../buy" itemprop="url"><span itemprop="name">
+        #      Buy</span></a> — which the address fallback regex
+        #      (itemprop="name"[^>]*>([^<]+)<) matched FIRST, since it
+        #      appears earlier in the document than the real address
+        #      heading (<h2 class="property-overview__address"
+        #      itemprop="name">90 Mortensen Road, Nerang</h2>). This is
+        #      why "Buy" was being extracted as the address for every
+        #      single listing on this page generation.
+        # Fixed by: checking the specific property-overview__status/
+        # __address classes FIRST (unambiguous, can't collide with nav
+        # elements), with the original itemprop-only patterns kept only
+        # as a fallback for pages where the specific classes might
+        # differ.
         status_price_match = re.search(
-            r'itemprop="identifier"[^>]*>([^<]+)<', html
+            r'class="[^"]*property-overview__status[^"]*"[^>]*>([^<]+)<', html
         )
         if not status_price_match:
-            # Fallback: the confirmed visible text pattern even if the
-            # exact itemprop attribute ordering differs from what's expected
+            status_price_match = re.search(
+                r'itemprop="identifier"[^>]*>([^<]+)<', html
+            )
+        if not status_price_match:
             status_price_match = re.search(
                 r'>((?:Sold|For Sale)\s+For\s+\$[\d,]+|(?:Sold|For Sale)[^<]{0,40}\$[\d,]+)<',
                 html,
@@ -540,12 +566,11 @@ class LJHookerAdapter:
 
         status, price = self._parse_price_and_status(status_price_match.group(1))
 
-        addr_match = re.search(r'itemprop="name"[^>]*>([^<]+)<', html)
+        addr_match = re.search(
+            r'class="[^"]*property-overview__address[^"]*"[^>]*>([^<]+)<', html
+        )
         if not addr_match:
-            addr_match = re.search(
-                r'<h2[^>]*class="[^"]*property-overview__address[^"]*"[^>]*>([^<]+)</h2>',
-                html,
-            )
+            addr_match = re.search(r'itemprop="name"[^>]*>([^<]+)<', html)
         address = addr_match.group(1).strip() if addr_match else ""
         if not address:
             log(f"    No address found on {listing_url}, skipping")
@@ -577,7 +602,17 @@ class LJHookerAdapter:
             # second-to-last comma-separated piece if it looks state-free
             suburb_candidate = parts[-1]
             suburb_match = re.match(r"([A-Za-z\s]+?)\s+[A-Z]{2,3}$", suburb_candidate)
-            suburb = suburb_match.group(1).strip() if suburb_match else ""
+            if suburb_match:
+                suburb = suburb_match.group(1).strip()
+            else:
+                # CONFIRMED REAL CASE (June 24, 2026, found via raw HTML):
+                # some addresses on this platform have NO state suffix
+                # at all in the last comma-separated segment — just the
+                # bare suburb name (e.g. "90 Mortensen Road, Nerang",
+                # not "..., Nerang QLD"). If the segment is short and
+                # alphabetic, it's very likely already just the suburb.
+                if re.match(r"^[A-Za-z\s]+$", suburb_candidate) and len(suburb_candidate) < 30:
+                    suburb = suburb_candidate
 
         listing_id_match = re.search(r"-([a-z0-9]{6,8})$", listing_url)
         listing_id = listing_id_match.group(1) if listing_id_match else listing_url

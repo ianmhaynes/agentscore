@@ -437,15 +437,32 @@ and detail-page extraction now succeed, with the EXISTING
 `itemprop="identifier"`/`itemprop="name"` parsing logic working
 completely unchanged once it actually receives real rendered content.
 
-**Still not yet confirmed against the REAL live Browserless API** —
-this exact integration has not been run with a real token. The
-request shape is confirmed correct from Browserless's own current
-documentation, and the full pipeline (fetch → extract, for both
-adapters now) has been verified with mocked responses matching that
-documented shape and this platform's confirmed real structure, but not
-end-to-end against the live API. Worth a real test against
-`nerang.ljhooker.com.au` with a genuine Browserless token before
-relying on this in production.
+**Confirmed working against the REAL live Browserless API (June 24,
+2026)** — a genuine, first-ever live test against `nerang.ljhooker.com.au`
+with a real token found **16 of 16 listings parsed successfully**,
+proving both discovery and detail-page extraction work end-to-end for
+the exact platform this feature was built to solve.
+
+**Two further real bugs found and fixed via the live test's raw HTML**
+(every listing initially showed `address: "Buy"`, `status: "Active"`
+for everything, including confirmed-sold properties):
+1. The page's NAV BAR has its own `itemprop="name"` element
+   (`<a href=".../buy" itemprop="url"><span itemprop="name">Buy
+   </span></a>`), appearing EARLIER in the document than the real
+   address heading — the original address regex matched this first.
+2. The real status field can be PLAIN `"SOLD"` with no price attached
+   at all (LJ Hooker doesn't always publish a final sold price) — the
+   original regex required a `$` amount in the same match, causing it
+   to miss this real, common case entirely.
+
+Fixed by checking the specific, unambiguous
+`property-overview__status`/`property-overview__address` classes
+FIRST (confirmed via raw HTML from a direct curl against Browserless's
+own `/content` API), with the original itemprop-only patterns kept
+only as a fallback. A third real difference was also found and fixed:
+some addresses on this platform have no state suffix on the last
+comma-separated segment (e.g. `"90 Mortensen Road, Nerang"`, not
+`"..., Nerang QLD"`) — suburb extraction now handles both formats.
 
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
