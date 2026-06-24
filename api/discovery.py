@@ -47,15 +47,24 @@ PLACES_API_BASE = "https://places.googleapis.com/v1/places"
 # being aware of for repeated/large-area runs.
 
 
-def discover_agencies(area, api_key, log=print, max_results=20):
+def discover_agencies(area, api_key, log=print, max_results=20, max_pages=5):
     """
     area: e.g. "Mermaid Waters QLD 4218" — fed directly into a Google
     Places text query, so a normal human-readable suburb/postcode works.
     api_key: caller's Google Places API key (Places API "New" must be
     enabled on the associated Google Cloud project).
-    max_results: Google Text Search returns up to 20 results per page;
-    this module does not yet implement pagination beyond the first page
-    (see "Known limitations" below).
+    max_results: how many results to request per page (Google caps
+    this at 20 regardless of what's requested above that).
+    max_pages: safety cap on how many pages of 20 to fetch in one call
+    (default 5 = up to 100 agencies). A broad query like "Gold Coast
+    QLD" genuinely has far more than 20 real estate agencies — Google's
+    Text Search paginates via a `nextPageToken` in the response, valid
+    for a follow-up request once a short delay has passed (Google's
+    documented behavior; this module waits 2s, matching common
+    real-world experience with this exact API). Without this cap, a
+    very broad query could keep paginating for a long time and run up
+    real API costs — 5 pages (~100 agencies) is a reasonable default
+    for a single area discovery call.
 
     Returns a list of dicts: {name, place_id, website} — website may be
     None if Place Details didn't return one for that agency.
@@ -69,24 +78,48 @@ def discover_agencies(area, api_key, log=print, max_results=20):
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": api_key,
-        "X-Goog-FieldMask": "places.displayName,places.id,places.formattedAddress",
+        "X-Goog-FieldMask": "places.displayName,places.id,places.formattedAddress,nextPageToken",
     }
-    body = {"textQuery": f"real estate agencies in {area}"}
 
-    try:
-        resp = requests.post(search_url, json=body, headers=headers, timeout=REQUEST_TIMEOUT)
-    except requests.RequestException as e:
-        log(f"ERROR: Text Search request failed — {e}")
-        return []
+    all_places = []
+    page_token = None
+    for page_num in range(1, max_pages + 1):
+        body = {"textQuery": f"real estate agencies in {area}"}
+        if page_token:
+            body["pageToken"] = page_token
 
-    if resp.status_code != 200:
-        log(f"ERROR: Text Search returned HTTP {resp.status_code}: {resp.text[:300]}")
-        return []
+        try:
+            resp = requests.post(search_url, json=body, headers=headers, timeout=REQUEST_TIMEOUT)
+        except requests.RequestException as e:
+            log(f"ERROR: Text Search request failed on page {page_num} — {e}")
+            break
 
-    data = resp.json()
-    places = data.get("places", [])
-    log(f"  Found {len(places)} agencies (Google Text Search, page 1 only — "
-        f"see module docstring re: pagination)")
+        if resp.status_code != 200:
+            log(f"ERROR: Text Search returned HTTP {resp.status_code} on page {page_num}: {resp.text[:300]}")
+            break
+
+        data = resp.json()
+        places = data.get("places", [])
+        all_places.extend(places)
+        log(f"  Page {page_num}: found {len(places)} agencies (running total: {len(all_places)})")
+
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            log(f"  No further pages — {len(all_places)} total agencies found across {page_num} page(s)")
+            break
+        if page_num == max_pages:
+            log(f"  Reached max_pages={max_pages} cap; more results may exist but were not fetched "
+                f"(increase max_pages if you need a more complete list for this area)")
+            break
+
+        # A nextPageToken needs a short delay before it becomes valid for
+        # a follow-up request — confirmed common real-world behavior with
+        # this API; requesting too soon can fail even with a token that
+        # will work correctly a couple of seconds later.
+        time.sleep(2)
+
+    places = all_places
+    log(f"Total: {len(places)} agencies found across all pages fetched")
 
     agencies = []
     for p in places:

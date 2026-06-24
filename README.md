@@ -334,6 +334,20 @@ possible later just by comparing snapshots over time for the same
 Sydney time, before business hours). All three new endpoints are also
 callable manually for testing, independent of the cron trigger.
 
+## Discovery pagination (June 24, 2026)
+
+Added multi-page support to `discover_agencies()` — confirmed via live
+testing that broad area queries (e.g. "Gold Coast QLD") genuinely have
+far more than Google's 20-results-per-page cap, and the original
+single-page implementation silently missed everything beyond the
+first 20. Now follows Google's documented `nextPageToken` chain across
+up to `max_pages` (default 5, i.e. up to 100 agencies per discovery
+call) — a deliberate safety cap, since an unbounded loop could run up
+real API costs on a sufficiently broad query. Includes the documented
+~2 second delay before using a `nextPageToken`, since requesting the
+next page too quickly can fail even with a token that works correctly
+moments later.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style
