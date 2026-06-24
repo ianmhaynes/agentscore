@@ -14,10 +14,38 @@ from datetime import date
 from scraper import scrape_offices
 from scoring import score_agents, summary_stats
 from discovery import discover_agencies
+import db
 
 app = Flask(__name__)
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+
+
+@app.route("/api/db-test")
+def db_test():
+    """
+    TEMPORARY diagnostic endpoint (June 24, 2026) — confirms the real
+    Supabase connection works from the live Vercel deployment, the same
+    "test against real bytes, not a mock" principle used throughout
+    this project. Safe to remove once Day 1-3 infrastructure is
+    confirmed stable; does not expose the connection string itself,
+    only a count and a timestamp.
+    """
+    try:
+        conn = db.get_connection()
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM offices")
+            office_count = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM listing_snapshots")
+            snapshot_count = cur.fetchone()[0]
+        conn.close()
+        return jsonify({
+            "connected": True,
+            "office_count": office_count,
+            "listing_snapshot_count": snapshot_count,
+        })
+    except Exception as e:
+        return jsonify({"connected": False, "error": str(e)}), 500
 
 
 @app.route("/")
