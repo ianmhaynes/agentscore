@@ -106,6 +106,75 @@ def test_scrape_office_with_hard_timeout_passes_through_fast_results():
     print("PASS: a fast scrape completes normally and returns its real result")
 
 
+def test_bulk_discover_and_seed_processes_multiple_regions_independently():
+    """
+    Built to add the rest of QLD's regions efficiently (June 24, 2026),
+    replacing the manual one-region-at-a-time UI workflow used for
+    Dural and Gold Coast. Each region is processed independently — if
+    one region's Places API call fails, the rest still proceed, and
+    the response reports per-region results so failures are visible.
+    """
+    def fake_discover(area, api_key, log=print, max_pages=5):
+        if area == "Broken Region":
+            raise RuntimeError("Places API quota exceeded")
+        if area == "Brisbane CBD QLD":
+            return [
+                {"name": "Agency A", "place_id": "1", "website": "https://agencya.com.au"},
+                {"name": "Agency B", "place_id": "2", "website": None},
+            ]
+        return [{"name": "Agency C", "place_id": "3", "website": "https://agencyc.com.au"}]
+
+    with patch.object(app_module, "discover_agencies", side_effect=fake_discover), \
+         patch.object(app_module.db, "upsert_office", return_value=1):
+        resp = client.post("/api/bulk-discover-and-seed", json={
+            "regions": ["Brisbane CBD QLD", "Broken Region", "Toowoomba QLD"],
+            "apiKey": "fake-key",
+        })
+        body = resp.get_json()
+        assert resp.status_code == 200
+        assert len(body["region_results"]) == 3
+        brisbane = next(r for r in body["region_results"] if r["region"] == "Brisbane CBD QLD")
+        assert brisbane["added"] == 1
+        assert brisbane["skipped_no_website"] == 1
+        broken = next(r for r in body["region_results"] if r["region"] == "Broken Region")
+        assert broken["added"] == 0
+        assert "Discovery failed" in broken["error"]
+        toowoomba = next(r for r in body["region_results"] if r["region"] == "Toowoomba QLD")
+        assert toowoomba["added"] == 1
+        assert body["total_offices_added"] == 2
+    print("PASS: bulk-discover-and-seed processes multiple regions independently, "
+          "one failure doesn't block the others")
+
+
+def test_bulk_discover_and_seed_validates_inputs():
+    resp = client.post("/api/bulk-discover-and-seed", json={"regions": [], "apiKey": "x"})
+    assert resp.status_code == 400
+
+    resp = client.post("/api/bulk-discover-and-seed", json={"regions": ["Brisbane"], "apiKey": ""})
+    assert resp.status_code == 400
+    print("PASS: bulk-discover-and-seed validates empty regions list and missing API key")
+
+
+def test_bulk_discover_and_seed_db_error_reported_per_region():
+    """A DB error during seeding must not crash the whole request — it
+    should be reported per-region, with other regions still attempted."""
+    def fake_discover(area, api_key, log=print, max_pages=5):
+        return [{"name": "Agency A", "place_id": "1", "website": "https://agencya.com.au"}]
+
+    with patch.object(app_module, "discover_agencies", side_effect=fake_discover), \
+         patch.object(app_module.db, "upsert_office", side_effect=RuntimeError("connection refused")):
+        resp = client.post("/api/bulk-discover-and-seed", json={
+            "regions": ["Region One", "Region Two"],
+            "apiKey": "fake-key",
+        })
+        body = resp.get_json()
+        assert resp.status_code == 200
+        for r in body["region_results"]:
+            assert r["added"] == 0
+            assert "Database error" in r["error"]
+    print("PASS: a DB error during seeding is reported per-region without crashing the whole request")
+
+
 def test_seed_offices_adds_and_skips_correctly():
     with patch.object(app_module.db, "upsert_office", return_value=42) as mock_upsert:
         resp = client.post("/api/seed-offices", json={
@@ -265,6 +334,9 @@ def test_office_status_converts_datetimes_to_strings():
 
 
 if __name__ == "__main__":
+    test_bulk_discover_and_seed_processes_multiple_regions_independently()
+    test_bulk_discover_and_seed_validates_inputs()
+    test_bulk_discover_and_seed_db_error_reported_per_region()
     test_scrape_office_with_hard_timeout_converts_listing_objects_to_dicts()
     test_scrape_office_with_hard_timeout_cuts_off_genuinely_slow_sites()
     test_scrape_office_with_hard_timeout_passes_through_fast_results()

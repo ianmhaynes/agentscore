@@ -60,6 +60,83 @@ def index():
         return f.read()
 
 
+@app.route("/api/bulk-discover-and-seed", methods=["POST"])
+def bulk_discover_and_seed():
+    """
+    Takes a LIST of region names (e.g. ["Brisbane CBD QLD", "Toowoomba
+    QLD", "Cairns QLD", ...]) plus a Google Places API key, and for
+    each region: runs discover_agencies() (with pagination, up to
+    max_pages each), then immediately upserts every discovered agency
+    with a real website into the offices table — all in one call,
+    rather than round-tripping through /api/discover and
+    /api/seed-offices separately for each region by hand.
+
+    Built specifically to add the rest of QLD's regions efficiently
+    (June 24, 2026), after manually seeding Dural and Gold Coast one
+    at a time via the UI.
+
+    Each region is processed independently — if one region's Places
+    API call fails, the rest still proceed; the response reports
+    per-region results so failures are visible, not silent.
+    """
+    data = request.get_json(force=True)
+    regions = data.get("regions", [])
+    api_key = data.get("apiKey", "").strip()
+    max_pages = data.get("maxPagesPerRegion", 5)
+
+    if not regions:
+        return jsonify({"error": "No regions provided"}), 400
+    if not api_key:
+        return jsonify({"error": "No Google Places API key provided"}), 400
+
+    region_results = []
+    for region in regions:
+        region = region.strip()
+        if not region:
+            continue
+
+        log_lines = []
+
+        def log(msg):
+            log_lines.append(msg)
+
+        try:
+            agencies = discover_agencies(region, api_key=api_key, log=log, max_pages=max_pages)
+        except Exception as e:
+            region_results.append({
+                "region": region, "discovered": 0, "added": 0,
+                "skipped_no_website": 0, "error": f"Discovery failed: {e}",
+            })
+            continue
+
+        added_count = 0
+        skipped_count = 0
+        seed_error = None
+        for agency in agencies:
+            website = (agency.get("website") or "").strip()
+            if not website:
+                skipped_count += 1
+                continue
+            domain = website.replace("https://", "").replace("http://", "").rstrip("/")
+            try:
+                db.upsert_office(domain, office_name=agency.get("name"), region=region)
+                added_count += 1
+            except Exception as e:
+                seed_error = f"Database error while saving: {e}"
+                break  # stop this region's seeding, but other regions still proceed
+
+        region_results.append({
+            "region": region,
+            "discovered": len(agencies),
+            "added": added_count,
+            "skipped_no_website": skipped_count,
+            "error": seed_error,
+        })
+
+    total_added = sum(r["added"] for r in region_results)
+    return jsonify({"region_results": region_results, "total_offices_added": total_added})
+
+
 @app.route("/api/discover", methods=["POST"])
 def discover():
     data = request.get_json(force=True)

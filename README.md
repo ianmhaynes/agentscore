@@ -528,6 +528,25 @@ confirmed to scale correctly to this larger batch size without any
 code changes — they operate on elapsed wall-clock time, independent
 of how many offices were requested in a batch.
 
+## Bulk region seeding (June 24, 2026)
+
+Added `/api/bulk-discover-and-seed` — takes a LIST of region names plus
+a Google Places API key, runs discovery (with pagination) for each
+region, and immediately seeds every discovered agency with a real
+website into the `offices` table, all in one call. Built to replace
+the manual one-region-at-a-time UI workflow used for Dural and Gold
+Coast, which doesn't scale to adding the rest of a whole state's
+worth of regions.
+
+Each region is processed independently — a failure in one region's
+Places API call (quota, network error) doesn't block the rest; the
+response reports per-region `discovered`/`added`/`skipped_no_website`/
+`error` counts so failures are visible, not silent. A `qld_regions.json`
+file (28 regions: greater Brisbane split into sensible sub-areas plus
+every significant regional city, sourced from population data) is the
+starting input for covering Queensland broadly without being
+needlessly exhaustive down to tiny towns.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style
