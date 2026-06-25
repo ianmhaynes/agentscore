@@ -249,6 +249,18 @@ def test_id_first_slug_url_pattern():
           "numeric-segment-after-ID edge case")
 
 
+def test_melita_bell_index_paths_in_candidate_list():
+    """
+    Confirmed real paths (The Melita Bell Team, RE/MAX Success
+    franchise — June 24, 2026): a real sold-listings index page with
+    471 pages of genuine results was found at /sold-residential.
+    """
+    adapter = GenericFallbackAdapter()
+    assert "/sold-residential" in adapter.CANDIDATE_INDEX_PATHS
+    assert "/current-residential-for-sale" in adapter.CANDIDATE_INDEX_PATHS
+    print("PASS: Melita Bell / RE/MAX Success index paths present in the candidate list")
+
+
 def test_rex_websites_index_path_in_candidate_list():
     """
     Confirmed real path (Kangaroo Point Real Estate, platform: Rex
@@ -567,6 +579,7 @@ if __name__ == "__main__":
     test_collect_listing_urls_handles_relative_hrefs()
     test_wordpress_plugin_calendar_urls_excluded()
     test_id_first_slug_url_pattern()
+    test_melita_bell_index_paths_in_candidate_list()
     test_rex_websites_index_path_in_candidate_list()
     test_rex_websites_url_pattern()
     test_wordpress_epl_url_pattern_narrowly_scoped()

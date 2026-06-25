@@ -850,6 +850,12 @@ class GenericFallbackAdapter:
         # Rex Websites — June 24, 2026): a real sold-listings index
         # page found 494 genuine sold listings at this exact URL.
         "/listings/?saleOrRental=Sale&sold=1",
+        # Confirmed real paths (The Melita Bell Team, RE/MAX Success
+        # franchise — June 24, 2026): a real sold-listings index page
+        # with 471 pages of genuine results was found at this exact
+        # path, on a different WordPress real estate plugin/theme than
+        # the EPL plugin confirmed earlier today.
+        "/sold-residential", "/current-residential-for-sale",
     ]
 
     def __init__(self, llm_api_key=None, browserless_api_key=None):

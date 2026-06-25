@@ -452,7 +452,7 @@ def try_wordpress_epl_pattern(html, log=None):
         status = "Sold"
 
     suburb = ""
-    # Confirmed real format: "{street}   {suburb} {STATE} {postcode}"
+    # Confirmed real format 1: "{street}   {suburb} {STATE} {postcode}"
     # (multiple spaces between street and suburb in the real rendered
     # text, not a comma) — must check the RAW text (before whitespace
     # collapsing above), since the double-space is the only signal
@@ -460,6 +460,15 @@ def try_wordpress_epl_pattern(html, log=None):
     suburb_match = re.search(r"\s{2,}([A-Za-z\s]+?)\s+[A-Z]{2,3}\s+\d{4}\s*$", raw_address_text.strip())
     if suburb_match:
         suburb = suburb_match.group(1).strip()
+    else:
+        # Confirmed real format 2 (The Melita Bell Team, RE/MAX
+        # Success — June 24, 2026): "{street}, {SUBURB} {STATE}
+        # {postcode}" — a comma before the suburb instead of a
+        # double-space. Same underlying WordPress real estate plugin
+        # family producing a second real address format.
+        comma_suburb_match = re.search(r",\s*([A-Za-z\s]+?)\s+[A-Z]{2,3}\s+\d{4}\s*$", address)
+        if comma_suburb_match:
+            suburb = comma_suburb_match.group(1).strip()
 
     if log:
         log("    [tier 3h: WordPress EPL pattern - h1 address + nearby price] matched")

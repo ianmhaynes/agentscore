@@ -582,6 +582,47 @@ def test_tier3d_reapit_agentbox_unchanged_by_kangaroo_point_investigation():
           "(no status text; no parseable price) that motivated NOT fixing the false positive here")
 
 
+def test_tier3h_wordpress_epl_handles_comma_based_suburb_format():
+    """
+    Confirmed real second address format for this tier (The Melita
+    Bell Team, RE/MAX Success franchise — June 24, 2026, found via a
+    real sold-listings index page with 471 pages of genuine results):
+    "{street}, {SUBURB} {STATE} {postcode}" — a comma before the
+    suburb, distinct from the original confirmed format
+    (Woolloongabba Real Estate's double-space, no comma at all). Same
+    underlying WordPress real estate plugin/theme family producing two
+    real address formats.
+    """
+    real_html = """
+    <html><body>
+    <h1>10/357 Margaret Street, NEWTOWN QLD 4350</h1>
+    Sold $660,000
+    </body></html>
+    """
+    result = et.extract_listing_fields(
+        real_html, "https://www.melitabell.com.au/property/10-357-margaret-street-newtown-qld-4350/"
+    )
+    assert result["tier"] == "wordpress_epl_pattern"
+    assert result["suburb"] == "NEWTOWN", f"FAIL: {result['suburb']!r}"
+    assert result["price"] == "660000"
+    assert result["status"] == "Sold"
+
+    # Confirm the ORIGINAL double-space format still works too
+    original_html = """
+    <html><body>
+    <h1>47 Shore Street   Russell Island QLD 4184</h1>
+    <div>3 Bed</div>
+    $475,000
+    </body></html>
+    """
+    original_result = et.extract_listing_fields(
+        original_html,
+        "https://woolloongabbarealestate.com.au/properties-for-sale/47-shore-street-russell-island-qld-4184/",
+    )
+    assert original_result["suburb"] == "Russell Island"
+    print("PASS: tier 3h handles both the comma-based and double-space-based suburb formats")
+
+
 def test_tier3g_eagle_software_pattern():
     """
     Confirmed real pattern (Living Estate Agents, platform: Eagle
@@ -708,6 +749,7 @@ if __name__ == "__main__":
     test_tier3h_wordpress_epl_no_longer_collides_with_rex_websites()
     test_tier3i_rex_websites_no_longer_collides_with_wordpress_epl()
     test_tier3d_reapit_agentbox_unchanged_by_kangaroo_point_investigation()
+    test_tier3h_wordpress_epl_handles_comma_based_suburb_format()
     test_tier3d_contract_field_with_whitespace_between_tags()
     test_tier3c_generic_scan()
     test_priority_order_json_ld_beats_everything()

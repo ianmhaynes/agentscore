@@ -707,6 +707,27 @@ somewhere nearby") before claiming a match, OR resolve via pipeline
 ordering when two tiers' real signatures genuinely can't be told apart
 from each other's confirmed real edge cases.
 
+## The Melita Bell Team — confirmed working with existing tier, one real format gap closed (June 24, 2026)
+
+Investigated `melitabell.com.au` (RE/MAX Success franchise, Toowoomba)
+as the next zero-listing office. Confirmed real, substantial sold-
+listings index page (`/sold-residential`) with **471 pages** of
+genuine results, and real listing pages with the exact same `<h1>`
+address + plain-text price structure as the WordPress EPL tier (3h)
+built yesterday — **the existing tier already correctly extracted
+address, price, and status with zero changes needed**, a genuinely
+clean generalization with no collision this time.
+
+The one real gap: this site's real address format uses a comma before
+the suburb (`"10/357 Margaret Street, NEWTOWN QLD 4350"`), distinct
+from Woolloongabba's original confirmed double-space format (`"47
+Shore Street   Russell Island QLD 4184"`, no comma at all) — both
+real formats from the same underlying WordPress real estate plugin/
+theme family. Added a comma-based fallback to the existing suburb
+extraction logic; both formats now work correctly. Two new candidate
+index paths added (`/sold-residential`, `/current-residential-for-
+sale`), confirmed real via direct fetch.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style
