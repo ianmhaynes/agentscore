@@ -634,6 +634,26 @@ is genuinely zero listings, not a missed extraction tier — worth
 documenting explicitly so this isn't mistaken for an unsolved gap on a
 future pass through the zero-listing offices.
 
+**Critical real bug found via live testing (June 24, 2026)**: the new
+Rex Websites tier above never actually got a chance to run on
+Kangaroo Point Real Estate — confirmed via a real curl test showing
+`"Matched adapter: cloudhi_rex"`, an EARLIER, unrelated adapter in the
+chain, returning 0 listings via a confused HTTP 404. Root cause:
+`CloudhiRexAdapter.detect()` checked for `"rexsoftware" in lowered`,
+matching on the PARENT COMPANY's name alone — but Rex Software makes
+at least two distinct, structurally different products: Cloudhi (this
+adapter's real target, confirmed on Harcourts) and "Rex Websites" (a
+different, also server-rendered product). Kangaroo Point's real
+footer links to `rexsoftware.com/products/real-estate-websites` — the
+same parent-company domain, but a completely different page structure
+this adapter was never built to handle. Fixed by requiring either the
+specific `cloudhi.io` domain, or `rexsoftware` WITHOUT the
+`real-estate-websites` product-path qualifier, distinguishing the two
+products precisely. The exact same class of bug as yesterday's LJ
+Hooker/Browserless gap (an earlier adapter intercepting and "winning"
+on a site it wasn't built for) — worth treating as a recurring pattern
+to watch for whenever multiple similarly-branded platforms exist.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style

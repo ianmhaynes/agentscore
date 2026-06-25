@@ -240,7 +240,31 @@ class CloudhiRexAdapter:
 
     def detect(self, html):
         lowered = html.lower()
-        return "cloudhi.io" in lowered or "rexsoftware" in lowered
+        # CONFIRMED REAL BUG (June 24, 2026): "rexsoftware" alone is too
+        # broad — Rex Software (the parent company) makes at least TWO
+        # distinct, structurally different products: Cloudhi (this
+        # adapter's actual target) and "Rex Websites" (a different,
+        # also-server-rendered product, confirmed real on Kangaroo
+        # Point Real Estate, whose footer links to
+        # rexsoftware.com/products/real-estate-websites — the SAME
+        # parent-company domain, but a COMPLETELY DIFFERENT page
+        # structure, handled by its own dedicated tier in
+        # extraction_tiers.py, not this adapter at all). Matching on
+        # the company name alone wrongly claimed Rex Websites sites for
+        # this adapter, which then correctly found nothing (wrong
+        # URL/page assumptions for that different product) and
+        # returned zero listings — exactly the kind of silent,
+        # confidently-wrong routing this project has hit more than once
+        # with similarly-named but structurally distinct platforms
+        # (e.g. yesterday's LJ Hooker HubSpot-vs-legacy distinction).
+        # Require "cloudhi.io" specifically, OR the more specific
+        # "rexsoftware.com/products/crm" (Cloudhi's actual product
+        # page, distinct from "/products/real-estate-websites").
+        if "cloudhi.io" in lowered:
+            return True
+        if "rexsoftware" in lowered and "real-estate-websites" not in lowered:
+            return True
+        return False
 
     def _parse_price(self, price_text):
         if not price_text:

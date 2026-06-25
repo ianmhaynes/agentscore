@@ -7,7 +7,7 @@ DOES verify the extraction/normalization logic is correct.
 import json
 import sys
 sys.path.insert(0, ".")
-from scraper import extract_initial_state, RayWhiteDynamicsAdapter
+from scraper import extract_initial_state, RayWhiteDynamicsAdapter, CloudhiRexAdapter
 
 FAKE_ACTIVE_HTML = """
 <html><body><script>
@@ -566,6 +566,42 @@ def test_calculate_days_on_market():
     print("PASS: calculate_days_on_market handles sold, missing, malformed, and active cases correctly")
 
 
+def test_cloudhi_rex_adapter_does_not_falsely_claim_rex_websites_sites():
+    """
+    CONFIRMED REAL BUG (June 24, 2026): Rex Software (the parent
+    company) makes at least two distinct, structurally different
+    products — Cloudhi (this adapter's real target, confirmed on
+    Harcourts Property Hub) and "Rex Websites" (a different, also
+    server-rendered product, confirmed real on Kangaroo Point Real
+    Estate). Both reference "rexsoftware.com" — the same parent-
+    company domain — but have completely different page structures.
+    The original detection (`"rexsoftware" in lowered`) matched on
+    the company name alone, wrongly claiming Rex Websites sites for
+    this adapter, which then correctly found nothing (wrong
+    URL/page assumptions for a different product) and silently
+    returned zero listings for a confirmed real office with 494
+    genuine sold listings.
+    """
+    adapter = CloudhiRexAdapter()
+
+    # The real confirmed Kangaroo Point Real Estate footer text
+    rex_websites_html = (
+        '<a href="https://www.rexsoftware.com/products/real-estate-websites">'
+        'Powered by Rex Websites</a>'
+    )
+    assert not adapter.detect(rex_websites_html), (
+        "FAIL: should NOT match — this is a different product (Rex Websites), "
+        "handled by its own tier in extraction_tiers.py, not this adapter"
+    )
+
+    # The genuine, original confirmed Cloudhi signal must still work
+    cloudhi_html = '<script src="https://cdn.cloudhi.io/widget.js"></script>'
+    assert adapter.detect(cloudhi_html), "FAIL: genuine Cloudhi sites must still be detected correctly"
+
+    print("PASS: CloudhiRexAdapter correctly distinguishes Cloudhi from the "
+          "unrelated 'Rex Websites' product made by the same parent company")
+
+
 if __name__ == "__main__":
     test_extract_initial_state()
     test_detect()
@@ -581,4 +617,5 @@ if __name__ == "__main__":
     test_scrape_office_retries_with_www_on_zero_listings()
     test_zero_listings_www_retry_safety_guards()
     test_calculate_days_on_market()
+    test_cloudhi_rex_adapter_does_not_falsely_claim_rex_websites_sites()
     print("\nAll tests passed.")
