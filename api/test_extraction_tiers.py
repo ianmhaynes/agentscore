@@ -677,6 +677,43 @@ def test_tier3j_wordpress_epl_structured_variant():
           "including the HTML-entity dollar sign, with no collision against the simpler variant")
 
 
+def test_tier3k_elders_franchise_wins_over_general_features_h4():
+    """
+    Regression test for a REAL BUG found via live testing (June 25,
+    2026): the real Elders detail page genuinely has a "General
+    Features" section heading (an <h4>) later on the page, which was
+    wrongly winning the match via tier 3d (Reapit/Agentbox), since
+    tier 3d ran EARLIER in the pipeline than tier 3k — even though
+    tier 3k's own structure (h1 + h2) is more specific and was added
+    specifically for this site. Confirmed via a real curl test showing
+    every single listing returning "General Features" as the address.
+    Fixed by moving tier 3k earlier in the pipeline, before tier 3d —
+    the same proven "reorder, don't weaken the more permissive tier"
+    fix already applied to the Rex Websites/Reapit-Agentbox collision.
+    """
+    real_html_with_general_features_h4 = """
+    <html><body>
+    <h1>15/3 Stanton Terrace</h1>
+    <h2>Townsville City QLD 4810</h2>
+    <div>3 Bed</div>
+    Offers over $699,000
+    <h4>General Features</h4>
+    <ul><li>Property Type: Unit</li></ul>
+    </body></html>
+    """
+    result = et.extract_listing_fields(
+        real_html_with_general_features_h4,
+        "https://smithandelliott.eldersrealestate.com.au/residential/sale/153-stanton-terrace-townsville-city-qld-4810-300P197394/",
+    )
+    assert result["tier"] == "elders_franchise_pattern", (
+        f"FAIL: tier 3d should not win over tier 3k, but got {result['tier']!r}"
+    )
+    assert result["address"] != "General Features", "FAIL: the real bug — extracted the wrong h4 text as the address"
+    assert result["suburb"] == "Townsville City"
+    assert result["price"] == "699000"
+    print("PASS: tier 3k correctly wins over a real 'General Features' h4 appearing later on the page")
+
+
 def test_tier3k_elders_franchise_pattern():
     """
     Confirmed real pattern (Elders Smith and Elliott Townsville
@@ -848,6 +885,7 @@ if __name__ == "__main__":
     test_tier3h_wordpress_epl_handles_comma_based_suburb_format()
     test_tier3j_wordpress_epl_structured_variant()
     test_tier3k_elders_franchise_pattern()
+    test_tier3k_elders_franchise_wins_over_general_features_h4()
     test_tier3d_contract_field_with_whitespace_between_tags()
     test_tier3c_generic_scan()
     test_priority_order_json_ld_beats_everything()

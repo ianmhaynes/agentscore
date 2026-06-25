@@ -1013,10 +1013,10 @@ def extract_listing_fields(html, listing_url, log=None, llm_api_key=None):
         # signals alone (a genuine active listing with no status text
         # at all) — see try_reapit_agentbox_pattern's own comments.
         try_rex_websites_pattern,
+        try_elders_franchise_pattern,
         try_reapit_agentbox_pattern,
         try_semibold_muted_pattern,
         try_renet_hidden_input_pattern,
-        try_elders_franchise_pattern,
         try_eagle_software_pattern,
         try_wordpress_epl_structured_pattern,
         try_wordpress_epl_pattern,

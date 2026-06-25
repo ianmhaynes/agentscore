@@ -830,6 +830,21 @@ real, recurring lesson: **any new tier sharing a structural shape
 must be checked for collision against every existing tier with that
 same shape, not just tested in isolation.**
 
+**The fix above shipped but genuinely did not work in production** —
+confirmed via a real live test showing all 35 discovered listings
+returning `"address": "General Features"`. Root cause: tier 3k
+(Elders franchise) was placed in the pipeline AFTER tier 3d (Reapit/
+Agentbox), but the real Elders detail page genuinely has a "General
+Features" section heading (an `<h4>`) elsewhere on the page — tier 3d
+matched on that h4 first (the same overly-permissive h4 matching
+already known from the Kangaroo Point investigation) before tier 3k
+ever got a chance to run. Fixed by moving tier 3k earlier in the
+pipeline, before tier 3d — the same proven "reorder, don't weaken the
+already-correct permissive tier" fix already applied to the Rex
+Websites/Reapit-Agentbox collision. Confirmed via a real fixture
+including the actual "General Features" h4 text, not just the
+original isolated h1/h2 fixture that didn't expose this gap.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style
