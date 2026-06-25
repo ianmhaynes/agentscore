@@ -943,6 +943,18 @@ class GenericFallbackAdapter:
         # "?" immediately after the prefix, no real slug at all).
         if re.match(r"^/properties-for-sale/[^?]+/$", path):
             return True
+        # Confirmed exception (Kangaroo Point Real Estate, platform:
+        # Rex Websites — confirmed via "Powered by Rex Websites" footer
+        # credit, June 24, 2026): listing URLs are
+        # "/listings/residential_sale-R2-{id}-{suburb-slug}" — the
+        # numeric ID sits in the MIDDLE of the slug (after "R2-"),
+        # followed by more text (the suburb), not at the very end of
+        # the path. Distinct from BresicWhitney's Rex CRM (a JS-gated
+        # dead end, confirmed in an earlier session) — "Rex Websites"
+        # is a different product from the same company, and is fully
+        # server-rendered.
+        if re.search(r"/listings/[a-z_]+-R\d-\d{4,}-[a-z]", path, re.IGNORECASE):
+            return True
         return bool(re.search(r"[-/]\d{4,}/?$", path))
 
     def _collect_listing_urls(self, html, domain):

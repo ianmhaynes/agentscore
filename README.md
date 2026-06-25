@@ -595,6 +595,45 @@ signature to actually be found before claiming a match — a real
 reminder that overly permissive matching in one tier can silently
 suppress a different, more correct tier later in the same pipeline.
 
+## Rex Websites pattern, a second tier-collision fix, and one honest non-fix (June 24, 2026)
+
+Investigated several confirmed zero-listing offices from the live
+cron job's real results. Two real, distinct findings:
+
+**Kangaroo Point Real Estate — confirmed working, new tier added.**
+Platform: "Rex Websites" (confirmed via footer credit) — a different,
+fully server-rendered product from the same company as
+BresicWhitney's "Rex CRM" (a confirmed JS-gated dead end from an
+earlier session; the two should not be conflated). Real listing index
+page (`/listings/?saleOrRental=Sale&sold=1`) showed **494 real sold
+listings** for this single office alone, fully crawlable. Real detail
+page structure: SOLD and price appear BEFORE a plain `<h1>` address —
+the opposite ordering from every other h1-based tier in this module.
+Added tier 3i and a matching URL exception for the confirmed
+`/listings/residential_sale-R2-{id}-{suburb}` pattern.
+
+**A second, real tier-collision bug**, same root cause as the Eagle
+Software/WordPress EPL collision found earlier today: the WordPress
+EPL tier (3h) matched any page with an h1 even without finding a real
+price AFTER it — which collided with the new Rex Websites tier, since
+that platform's price comes BEFORE the h1, leaving nothing for EPL's
+"price after address" check to find, yet it was still claiming the
+match with an empty price. Fixed using the identical proven pattern:
+require the tier's own real distinguishing signature before claiming
+victory. Worth noting as a pattern now: **any new h1-based tier added
+to this pipeline must be checked against every existing h1-based tier
+for this exact class of collision** — this is the second time it's
+happened, and a third will too if matching stays this permissive.
+
+**michaelbacon.com.au — confirmed NOT a bug, no fix needed.**
+Investigated as a zero-listing office; confirmed via direct fetch this
+is a personal agent marketing/portfolio site (Framer-built — bios,
+video testimonials, social stats, a contact form), with zero property
+listings of any kind on the domain itself. The correct, honest outcome
+is genuinely zero listings, not a missed extraction tier — worth
+documenting explicitly so this isn't mistaken for an unsolved gap on a
+future pass through the zero-listing offices.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style

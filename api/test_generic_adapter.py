@@ -249,6 +249,22 @@ def test_id_first_slug_url_pattern():
           "numeric-segment-after-ID edge case")
 
 
+def test_rex_websites_url_pattern():
+    """
+    Confirmed real exception (Kangaroo Point Real Estate, platform:
+    Rex Websites — June 24, 2026): listing URLs are
+    "/listings/residential_sale-R2-{id}-{suburb-slug}" — the numeric
+    ID sits in the MIDDLE of the slug (after "R2-"), not at the end.
+    Distinct from BresicWhitney's Rex CRM (a confirmed JS-gated dead
+    end) — "Rex Websites" is a different, server-rendered product.
+    """
+    adapter = GenericFallbackAdapter()
+    domain = "https://kangaroopointrealestate.com.au"
+    real_url = "https://kangaroopointrealestate.com.au/listings/residential_sale-R2-5091526-kangaroo-point"
+    assert adapter._looks_like_listing_url(real_url, domain), "FAIL: should accept the real Rex Websites listing URL"
+    print("PASS: Rex Websites URL pattern correctly accepted")
+
+
 def test_wordpress_epl_url_pattern_narrowly_scoped():
     """
     Confirmed real exception (Woolloongabba Real Estate, WordPress
@@ -534,6 +550,7 @@ if __name__ == "__main__":
     test_collect_listing_urls_handles_relative_hrefs()
     test_wordpress_plugin_calendar_urls_excluded()
     test_id_first_slug_url_pattern()
+    test_rex_websites_url_pattern()
     test_wordpress_epl_url_pattern_narrowly_scoped()
     test_eagle_software_property_id_url_pattern()
     test_protocol_relative_urls_resolved_without_doubling()

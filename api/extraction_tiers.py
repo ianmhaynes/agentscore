@@ -424,10 +424,22 @@ def try_wordpress_epl_pattern(html, log=None):
     if not address or len(address) < 8:
         return None
 
-    # Price: the first $ amount appearing reasonably close after the h1
+    # CONFIRMED REAL BUG (June 24, 2026): this tier originally matched
+    # any page with an h1, even with no real price found after it,
+    # which caused it to collide with a THIRD, later-added h1-based
+    # tier (Rex Websites pattern, Kangaroo Point Real Estate) — that
+    # platform puts its price BEFORE the h1, not after, so a genuine
+    # Rex Websites page has no real $ amount in the text immediately
+    # following its h1, yet this tier was still claiming the match
+    # with an empty price. Fixed by requiring this tier's own real
+    # distinguishing signature (a price genuinely found AFTER the
+    # address) before claiming victory — the same fix pattern already
+    # applied to the Eagle Software tier earlier today.
     after_address = html[addr_match.end():addr_match.end() + 1500]
     price_match = re.search(r"\$\s*[\d,]+", after_address)
-    price = _parse_price(price_match.group(0)) if price_match else ""
+    if not price_match:
+        return None
+    price = _parse_price(price_match.group(0))
 
     # Status: this platform shows "Sold" as a separate label on the
     # homepage card, not combined with the address/price text on the
@@ -458,6 +470,55 @@ def try_wordpress_epl_pattern(html, log=None):
         "price": price,
         "status": status,
         "tier": "wordpress_epl_pattern",
+    }
+
+
+def try_rex_websites_pattern(html, log=None):
+    """
+    Tier 3i. Confirmed real pattern (Kangaroo Point Real Estate,
+    platform: Rex Websites — confirmed via "Powered by Rex Websites"
+    footer credit, June 24, 2026):
+        SOLD
+        $1,010,000
+        # 8 / 50 Rotherham Street, Kangaroo Point QLD 4169
+    Address combined in a plain <h1> (full street + suburb + state +
+    postcode), with "SOLD" and price appearing as separate text BEFORE
+    the h1 (not after, unlike most other tiers in this module) —
+    confirmed real index-page cards also show this same SOLD-then-
+    price-then-address-heading ordering. Distinct from BresicWhitney's
+    "Rex CRM" (a confirmed JS-gated dead end from an earlier session) —
+    "Rex Websites" is a different, fully server-rendered product from
+    the same company.
+    """
+    addr_match = re.search(r"<h1[^>]*>([^<]+)</h1>", html)
+    if not addr_match:
+        return None
+    address = re.sub(r"\s+", " ", addr_match.group(1)).strip()
+    if not address or len(address) < 8:
+        return None
+
+    # Status/price appear BEFORE the h1 on this platform, confirmed
+    # real ordering — check a window of text immediately preceding it.
+    before_address = html[max(0, addr_match.start() - 500):addr_match.start()]
+    status = "Sold" if re.search(r"(?:^|[>\s])SOLD(?:[<\s]|$)", before_address, re.IGNORECASE) else "Active"
+
+    price_match = re.search(r"\$\s*[\d,]+(?!\s*per)", before_address)
+    price = _parse_price(price_match.group(0)) if price_match else ""
+
+    suburb = ""
+    suburb_match = re.search(r",\s*([A-Za-z\s]+?)\s+[A-Z]{2,3}\s+\d{4}\s*$", address)
+    if suburb_match:
+        suburb = suburb_match.group(1).strip()
+
+    if log:
+        log("    [tier 3i: Rex Websites pattern - SOLD/price before h1 address] matched")
+    return {
+        "address": address,
+        "suburb": suburb,
+        "postcode": "",
+        "price": price,
+        "status": status,
+        "tier": "rex_websites_pattern",
     }
 
 
@@ -749,6 +810,7 @@ def extract_listing_fields(html, listing_url, log=None, llm_api_key=None):
         try_renet_hidden_input_pattern,
         try_eagle_software_pattern,
         try_wordpress_epl_pattern,
+        try_rex_websites_pattern,
         try_generic_dollar_scan,
     ):
         result = tier_fn(html, log=log)

@@ -411,6 +411,82 @@ def test_tier3g_eagle_software_no_longer_collides_with_other_h1_based_tiers():
           "requires its own real <h2> price signature to match, own real case still works")
 
 
+def test_tier3i_rex_websites_pattern():
+    """
+    Confirmed real pattern (Kangaroo Point Real Estate, platform: Rex
+    Websites — confirmed via "Powered by Rex Websites" footer credit,
+    June 24, 2026): SOLD and price appear BEFORE a plain <h1> address
+    (the opposite ordering from most other h1-based tiers, where price
+    comes after). Distinct from BresicWhitney's "Rex CRM" (a confirmed
+    JS-gated dead end from an earlier session) — "Rex Websites" is a
+    different, fully server-rendered product from the same company.
+    """
+    real_html = """
+    <html><body>
+    SOLD
+    $1,010,000
+    <h1>8 / 50 Rotherham Street, Kangaroo Point QLD 4169</h1>
+    <div>1 Bed</div>
+    </body></html>
+    """
+    result = et.try_rex_websites_pattern(real_html)
+    assert result is not None
+    assert result["price"] == "1010000"
+    assert result["status"] == "Sold"
+    assert result["suburb"] == "Kangaroo Point"
+    print("PASS: tier 3i (Rex Websites) correctly parses real confirmed structure")
+
+
+def test_tier3h_wordpress_epl_no_longer_collides_with_rex_websites():
+    """
+    Regression test for a REAL BUG found while building tier 3i
+    (June 24, 2026): try_wordpress_epl_pattern() originally matched
+    ANY page with an h1, even with no real price found AFTER it —
+    which caused it to collide with the new Rex Websites tier, since
+    that platform puts its price BEFORE the h1, leaving no real $
+    amount in the text immediately following. Fixed using the same
+    proven pattern as the earlier Eagle Software collision fix: require
+    the tier's own real distinguishing signature (a price genuinely
+    found after the address) before claiming a match.
+    """
+    rex_style_html = """
+    <html><body>
+    SOLD
+    $1,010,000
+    <h1>8 / 50 Rotherham Street, Kangaroo Point QLD 4169</h1>
+    <div>1 Bed</div>
+    </body></html>
+    """
+    result = et.try_wordpress_epl_pattern(rex_style_html)
+    assert result is None, (
+        f"FAIL: WordPress EPL tier should step aside when there's no real price after the h1, "
+        f"but it matched: {result}"
+    )
+
+    # Confirm WordPress EPL's own real case still works
+    woolloongabba_html = """
+    <html><body>
+    <h1>47 Shore Street   Russell Island QLD 4184</h1>
+    <div>3 Bed</div>
+    $475,000
+    </body></html>
+    """
+    own_result = et.try_wordpress_epl_pattern(woolloongabba_html)
+    assert own_result is not None
+    assert own_result["price"] == "475000"
+
+    # Confirm the full pipeline correctly routes the Rex Websites page to tier 3i, not 3h
+    full_result = et.extract_listing_fields(
+        rex_style_html,
+        "https://kangaroopointrealestate.com.au/listings/residential_sale-R2-5091526-kangaroo-point",
+    )
+    assert full_result["tier"] == "rex_websites_pattern", (
+        f"FAIL: full pipeline should route to tier 3i, got {full_result['tier']!r}"
+    )
+    print("PASS: WordPress EPL no longer collides with Rex Websites pattern — "
+          "requires its own real price-after-address signature, own real case still works")
+
+
 def test_tier3g_eagle_software_pattern():
     """
     Confirmed real pattern (Living Estate Agents, platform: Eagle
@@ -533,6 +609,8 @@ if __name__ == "__main__":
     test_tier3g_eagle_software_pattern()
     test_tier3h_wordpress_epl_pattern()
     test_tier3g_eagle_software_no_longer_collides_with_other_h1_based_tiers()
+    test_tier3i_rex_websites_pattern()
+    test_tier3h_wordpress_epl_no_longer_collides_with_rex_websites()
     test_tier3d_contract_field_with_whitespace_between_tags()
     test_tier3c_generic_scan()
     test_priority_order_json_ld_beats_everything()
