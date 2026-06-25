@@ -728,6 +728,25 @@ extraction logic; both formats now work correctly. Two new candidate
 index paths added (`/sold-residential`, `/current-residential-for-
 sale`), confirmed real via direct fetch.
 
+**The earlier fix above genuinely did not work** — confirmed via a
+real live test (zero of 18 candidate pages parsed, including the
+exact page used to build that fix). The markdown-converted preview
+made this page LOOK like Woolloongabba's simple plain-text EPL
+structure, but a direct curl for the real raw bytes revealed a
+genuinely different, more structured variant: every address component
+(`item-street`, `item-suburb`, `item-state`, `item-pcode`) lives in
+its own explicit semantic `<span>`, nested inside the `<h1>` rather
+than as direct text — invisible to a regex requiring no nested tags.
+The price also uses an HTML entity (`&#036;`) for the dollar sign, not
+a literal `$` character. Added tier 3j specifically for this confirmed
+structured variant, built from the real raw HTML this time, not a
+markdown guess — the exact same lesson this project has hit several
+times before (Travers Gray's hidden-input pattern, the LJ Hooker
+nav-bar collision): **a markdown conversion can look identical to a
+working pattern while the real underlying HTML is genuinely
+different** — only real raw bytes, fetched directly, can confirm a
+fix actually works.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style

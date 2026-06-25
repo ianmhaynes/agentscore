@@ -623,6 +623,60 @@ def test_tier3h_wordpress_epl_handles_comma_based_suburb_format():
     print("PASS: tier 3h handles both the comma-based and double-space-based suburb formats")
 
 
+def test_tier3j_wordpress_epl_structured_variant():
+    """
+    Confirmed real STRUCTURED variant of the WordPress "EPL" plugin
+    (The Melita Bell Team, RE/MAX Success franchise — confirmed via
+    REAL RAW HTML from a direct curl, June 24, 2026 — NOT a markdown-
+    converted guess. The original tier 3h, built from Woolloongabba
+    Real Estate's simpler plain-text version of this same plugin,
+    genuinely returned zero parsed listings on this site despite
+    looking superficially similar in the markdown-converted preview —
+    only the real raw bytes revealed the actual nested-span structure
+    and the HTML-entity dollar sign).
+    """
+    real_raw_html = """
+    <div class="entry-col epl-property-details property-details">
+        <h1 class="entry-title">
+        <span class="item-street">10/357 Margaret Street,</span>
+        <span class="entry-title-sub">
+            <span class="item-suburb">NEWTOWN</span>
+            <span class="item-state">QLD</span>
+            <span class="item-pcode">4350</span>
+        </span>
+        </h1>
+    </div>
+    <div class="entry-col property-pricing-details">
+        <div class="epl-property-meta property-meta pricing">
+            <span class="page-price sold-status">Sold &#036;660,000</span>
+        </div>
+    </div>
+    """
+    result = et.try_wordpress_epl_structured_pattern(real_raw_html)
+    assert result is not None
+    assert result["suburb"] == "NEWTOWN"
+    assert result["postcode"] == "4350"
+    assert result["price"] == "660000", f"FAIL: {result['price']!r} (HTML entity dollar sign not decoded?)"
+    assert result["status"] == "Sold"
+
+    full_result = et.extract_listing_fields(
+        real_raw_html, "https://www.melitabell.com.au/property/10-357-margaret-street-newtown-qld-4350/"
+    )
+    assert full_result["tier"] == "wordpress_epl_structured_pattern"
+
+    # Confirm no collision with the simpler plain-text EPL variant (tier 3h)
+    woolloongabba_html = """
+    <html><body>
+    <h1>47 Shore Street   Russell Island QLD 4184</h1>
+    <div>3 Bed</div>
+    $475,000
+    </body></html>
+    """
+    assert et.try_wordpress_epl_structured_pattern(woolloongabba_html) is None
+    print("PASS: tier 3j (structured EPL variant) correctly parses real raw HTML, "
+          "including the HTML-entity dollar sign, with no collision against the simpler variant")
+
+
 def test_tier3g_eagle_software_pattern():
     """
     Confirmed real pattern (Living Estate Agents, platform: Eagle
@@ -750,6 +804,7 @@ if __name__ == "__main__":
     test_tier3i_rex_websites_no_longer_collides_with_wordpress_epl()
     test_tier3d_reapit_agentbox_unchanged_by_kangaroo_point_investigation()
     test_tier3h_wordpress_epl_handles_comma_based_suburb_format()
+    test_tier3j_wordpress_epl_structured_variant()
     test_tier3d_contract_field_with_whitespace_between_tags()
     test_tier3c_generic_scan()
     test_priority_order_json_ld_beats_everything()

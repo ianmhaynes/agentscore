@@ -389,6 +389,83 @@ def try_renet_hidden_input_pattern(html, log=None):
     }
 
 
+def try_wordpress_epl_structured_pattern(html, log=None):
+    """
+    Tier 3j. Confirmed real STRUCTURED variant of the WordPress "EPL"
+    plugin (The Melita Bell Team, RE/MAX Success franchise — confirmed
+    via real raw HTML from a direct curl, June 24, 2026, NOT a
+    markdown-converted guess — the original tier 3h, built from
+    Woolloongabba Real Estate's simpler plain-text-inside-h1 version of
+    this same plugin, did not match this site at all):
+        <h1 class="entry-title">
+            <span class="item-street">10/357 Margaret Street,</span>
+            <span class="entry-title-sub">
+                <span class="item-suburb">NEWTOWN</span>
+                <span class="item-state">QLD</span>
+                <span class="item-pcode">4350</span>
+            </span>
+        </h1>
+        ...
+        <span class="page-price sold-status">Sold &#036;660,000</span>
+    Every address component has its OWN explicit semantic class —
+    genuinely easier and more reliable to extract than tier 3h's plain
+    text, since no fragile space/comma-counting heuristics are needed
+    at all. Confirmed real detail: the price uses an HTML entity
+    (&#036;) for the dollar sign, not a literal "$" character — must
+    be decoded (or matched directly) rather than assumed.
+    """
+    street_match = re.search(r'class="item-street"[^>]*>([^<]+)<', html)
+    if not street_match:
+        return None
+    street = street_match.group(1).strip().rstrip(",").strip()
+
+    suburb_match = re.search(r'class="item-suburb"[^>]*>([^<]+)<', html)
+    state_match = re.search(r'class="item-state"[^>]*>([^<]+)<', html)
+    pcode_match = re.search(r'class="item-pcode"[^>]*>([^<]+)<', html)
+
+    suburb = suburb_match.group(1).strip() if suburb_match else ""
+    state = state_match.group(1).strip() if state_match else ""
+    pcode = pcode_match.group(1).strip() if pcode_match else ""
+
+    if not suburb:
+        # Without at least a suburb, this isn't confirmed to be the
+        # real structured EPL variant — step aside rather than return
+        # a bare street with no real address context.
+        return None
+
+    address_parts = [p for p in [street, suburb, state, pcode] if p]
+    address = ", ".join([street, " ".join([p for p in [suburb, state, pcode] if p])]) if street else ""
+    if not address:
+        return None
+
+    price_status_match = re.search(
+        r'class="[^"]*page-price[^"]*"[^>]*>([^<]+)<', html
+    )
+    status = ""
+    price = ""
+    if price_status_match:
+        raw_text = price_status_match.group(1)
+        # Confirmed real detail: the dollar sign is an HTML entity
+        # (&#036;), decoded here rather than assumed to be a literal $.
+        decoded_text = raw_text.replace("&#036;", "$").replace("&#36;", "$")
+        if decoded_text.strip().lower().startswith("sold"):
+            status = "Sold"
+        elif "sale" in decoded_text.strip().lower():
+            status = "Active"
+        price = _parse_price(decoded_text)
+
+    if log:
+        log("    [tier 3j: WordPress EPL structured variant - explicit address spans] matched")
+    return {
+        "address": address,
+        "suburb": suburb,
+        "postcode": pcode,
+        "price": price,
+        "status": status,
+        "tier": "wordpress_epl_structured_pattern",
+    }
+
+
 def try_wordpress_epl_pattern(html, log=None):
     """
     Tier 3h. Confirmed real pattern (Woolloongabba Real Estate,
@@ -882,6 +959,7 @@ def extract_listing_fields(html, listing_url, log=None, llm_api_key=None):
         try_semibold_muted_pattern,
         try_renet_hidden_input_pattern,
         try_eagle_software_pattern,
+        try_wordpress_epl_structured_pattern,
         try_wordpress_epl_pattern,
         try_generic_dollar_scan,
     ):
