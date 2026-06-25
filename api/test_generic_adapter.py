@@ -249,6 +249,23 @@ def test_id_first_slug_url_pattern():
           "numeric-segment-after-ID edge case")
 
 
+def test_rex_websites_index_path_in_candidate_list():
+    """
+    Confirmed real path (Kangaroo Point Real Estate, platform: Rex
+    Websites — June 24, 2026): a real sold-listings index page found
+    494 genuine sold listings at this exact URL. Must be present in
+    CANDIDATE_INDEX_PATHS for fetch() to ever check it — confirmed via
+    a real live test that, even after fixing the CloudhiRexAdapter
+    false-positive routing bug, the site still returned 0 listings
+    because this path simply wasn't in the candidate list at all.
+    """
+    adapter = GenericFallbackAdapter()
+    assert "/listings/?saleOrRental=Sale&sold=1" in adapter.CANDIDATE_INDEX_PATHS, (
+        "The confirmed real Rex Websites sold-listings path must be in CANDIDATE_INDEX_PATHS"
+    )
+    print("PASS: Rex Websites sold-listings index path is present in the candidate list")
+
+
 def test_rex_websites_url_pattern():
     """
     Confirmed real exception (Kangaroo Point Real Estate, platform:
@@ -550,6 +567,7 @@ if __name__ == "__main__":
     test_collect_listing_urls_handles_relative_hrefs()
     test_wordpress_plugin_calendar_urls_excluded()
     test_id_first_slug_url_pattern()
+    test_rex_websites_index_path_in_candidate_list()
     test_rex_websites_url_pattern()
     test_wordpress_epl_url_pattern_narrowly_scoped()
     test_eagle_software_property_id_url_pattern()

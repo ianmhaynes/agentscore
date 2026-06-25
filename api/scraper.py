@@ -846,6 +846,10 @@ class GenericFallbackAdapter:
         "/recently-sold", "/sold", "/show-all-properties",
         "/selling/recent-sales", "/buying/properties-for-sale",
         "/buying/recently-sold",
+        # Confirmed real path (Kangaroo Point Real Estate, platform:
+        # Rex Websites — June 24, 2026): a real sold-listings index
+        # page found 494 genuine sold listings at this exact URL.
+        "/listings/?saleOrRental=Sale&sold=1",
     ]
 
     def __init__(self, llm_api_key=None, browserless_api_key=None):
