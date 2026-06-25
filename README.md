@@ -654,6 +654,19 @@ Hooker/Browserless gap (an earlier adapter intercepting and "winning"
 on a site it wasn't built for) — worth treating as a recurring pattern
 to watch for whenever multiple similarly-branded platforms exist.
 
+**A third, final piece was needed**: even after fixing the
+CloudhiRexAdapter false-positive routing, Kangaroo Point still
+returned 0 listings, because the confirmed real sold-listings index
+path (`/listings/?saleOrRental=Sale&sold=1`) was never actually added
+to `CANDIDATE_INDEX_PATHS` — meaning `GenericFallbackAdapter` correctly
+ran, but had no candidate path that would ever find this site's real
+listings. Three distinct real bugs total were needed to get this one
+office working end-to-end: the tier itself (3i), the routing
+false-positive (CloudhiRexAdapter), and the missing candidate path —
+a genuine reminder that "the tier exists" and "the tier ever gets a
+chance to run on real data" are two separate things worth verifying
+independently, not assumed together.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style
