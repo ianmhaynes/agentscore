@@ -389,6 +389,78 @@ def try_renet_hidden_input_pattern(html, log=None):
     }
 
 
+def try_wordpress_epl_pattern(html, log=None):
+    """
+    Tier 3h. Confirmed real pattern (Woolloongabba Real Estate,
+    WordPress "EPL" real estate plugin — confirmed via
+    "?action=epl_search&post_type=property" query params on the
+    site's own nav links — June 24, 2026):
+        <h1>47 Shore Street   Russell Island QLD 4184</h1>
+        ...bed/bath/car icons...
+        $475,000
+    Address combined in a plain <h1> (full street + suburb + state +
+    postcode, no separate elements), price as plain text nearby — no
+    "Sold For" combined text confirmed for an ACTIVE listing (this
+    site's sold listings, per the homepage card text, show "Sold" as
+    a separate label from the address, not combined into one string
+    the way some other platforms do).
+
+    Built GENERICALLY (any <h1> + nearby $ amount) rather than
+    targeting a specific CSS class, since only markdown-converted page
+    content was available to confirm this structure, not raw HTML —
+    a previous session's mistake of guessing exact class names from
+    converted content (rather than verified raw bytes) caused a real,
+    multi-hour debugging issue. A generic match is safer here: it
+    risks matching IRRELEVANT h1 elements on a page that has more than
+    one, but that's a lower-cost failure mode (skips a listing) than
+    confidently extracting WRONG data from a guessed class name that
+    doesn't actually exist in the real HTML.
+    """
+    addr_match = re.search(r"<h1[^>]*>([^<]+)</h1>", html)
+    if not addr_match:
+        return None
+    raw_address_text = addr_match.group(1)
+    address = re.sub(r"\s+", " ", raw_address_text).strip()
+    if not address or len(address) < 8:
+        return None
+
+    # Price: the first $ amount appearing reasonably close after the h1
+    after_address = html[addr_match.end():addr_match.end() + 1500]
+    price_match = re.search(r"\$\s*[\d,]+", after_address)
+    price = _parse_price(price_match.group(0)) if price_match else ""
+
+    # Status: this platform shows "Sold" as a separate label on the
+    # homepage card, not combined with the address/price text on the
+    # detail page itself (confirmed: an active listing's detail page
+    # has no "Sold" text near the price at all). Check for an explicit
+    # "Sold" marker near the price; default to Active if absent, same
+    # conservative approach as the Eagle Software tier.
+    status = ""
+    if re.search(r"(?:^|[>\s])Sold(?:[<\s]|$)", after_address, re.IGNORECASE):
+        status = "Sold"
+
+    suburb = ""
+    # Confirmed real format: "{street}   {suburb} {STATE} {postcode}"
+    # (multiple spaces between street and suburb in the real rendered
+    # text, not a comma) — must check the RAW text (before whitespace
+    # collapsing above), since the double-space is the only signal
+    # distinguishing street from suburb.
+    suburb_match = re.search(r"\s{2,}([A-Za-z\s]+?)\s+[A-Z]{2,3}\s+\d{4}\s*$", raw_address_text.strip())
+    if suburb_match:
+        suburb = suburb_match.group(1).strip()
+
+    if log:
+        log("    [tier 3h: WordPress EPL pattern - h1 address + nearby price] matched")
+    return {
+        "address": address,
+        "suburb": suburb,
+        "postcode": "",
+        "price": price,
+        "status": status,
+        "tier": "wordpress_epl_pattern",
+    }
+
+
 def try_eagle_software_pattern(html, log=None):
     """
     Tier 3g. Confirmed real pattern (Living Estate Agents, platform:
@@ -411,10 +483,22 @@ def try_eagle_software_pattern(html, log=None):
     if not address:
         return None
 
+    # CONFIRMED REAL BUG (June 24, 2026): this tier originally matched
+    # ANY page with an <h1>, even with no <h2> price found at all,
+    # silently returning an empty price. That made it collide with a
+    # different, later-added tier (WordPress EPL pattern,
+    # Woolloongabba Real Estate) which ALSO uses a plain <h1> for the
+    # address but puts the price as nearby plain text, not inside an
+    # <h2>. Since this tier ran first in the pipeline, it was
+    # incorrectly "winning" on EPL pages too, returning a wrong/empty
+    # result instead of letting the correct tier match. Fixed by
+    # requiring the actual confirmed <h2> price element to be found —
+    # this tier's real, distinguishing signature — rather than treating
+    # "has an h1" alone as sufficient to claim the match.
     price_match = re.search(r"<h2[^>]*>([^<]+)</h2>", html)
-    price = ""
-    if price_match:
-        price = _parse_price(price_match.group(1))
+    if not price_match:
+        return None
+    price = _parse_price(price_match.group(1))
 
     suburb = ""
     parts = [p.strip() for p in address.split(",")]
@@ -664,6 +748,7 @@ def extract_listing_fields(html, listing_url, log=None, llm_api_key=None):
         try_semibold_muted_pattern,
         try_renet_hidden_input_pattern,
         try_eagle_software_pattern,
+        try_wordpress_epl_pattern,
         try_generic_dollar_scan,
     ):
         result = tier_fn(html, log=log)

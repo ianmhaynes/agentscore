@@ -922,6 +922,27 @@ class GenericFallbackAdapter:
         # trying to generalize further.
         if re.search(r"/\d{4,}-[a-zA-Z0-9]", path):
             return True
+        # Confirmed exception (Woolloongabba Real Estate, WordPress
+        # "EPL" real estate plugin — confirmed via
+        # "?action=epl_search&post_type=property" query params on the
+        # site's own nav links — June 24, 2026): real listing URLs are
+        # "/properties-for-sale/{full-address-slug-ending-in-postcode}/"
+        # — e.g.
+        # "/properties-for-sale/506-19-hope-street-south-brisbane-qld-4101/".
+        # The trailing 4-digit number here is a POSTCODE, not a real
+        # listing ID — the general trailing-numeric-ID rule below would
+        # ALSO match this (correctly, by coincidence), but it would
+        # JUST AS EASILY match other postcode-ending nav links that
+        # aren't listings at all, since "ends in 4 digits" is an
+        # extremely common, generic pattern for any Australian
+        # address-shaped URL. This exception is intentionally NARROW —
+        # it requires the known "/properties-for-sale/" prefix AND a
+        # genuine slug (not a query string) between it and the trailing
+        # slash, specifically excluding the real nav link
+        # "/properties-for-sale/?action=epl_search..." (which has a
+        # "?" immediately after the prefix, no real slug at all).
+        if re.match(r"^/properties-for-sale/[^?]+/$", path):
+            return True
         return bool(re.search(r"[-/]\d{4,}/?$", path))
 
     def _collect_listing_urls(self, html, domain):

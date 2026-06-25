@@ -322,6 +322,95 @@ def test_tier3d_contract_field_with_whitespace_between_tags():
           "tags (the exact real bug found via live curl, invisible to every prior fixture)")
 
 
+def test_tier3h_wordpress_epl_pattern():
+    """
+    Confirmed real pattern (Woolloongabba Real Estate, WordPress "EPL"
+    real estate plugin, confirmed via "?action=epl_search&post_type=
+    property" query params on the site's own nav links — June 24,
+    2026): address combined in a plain <h1> (full street + suburb +
+    state + postcode, multiple spaces between street and suburb), price
+    as plain text nearby, no combined "Sold For $X" text on active
+    listings. Built GENERICALLY (any h1 + nearby $ amount) since only
+    markdown-converted content was available to confirm this structure,
+    not verified raw HTML.
+    """
+    real_active_html = """
+    <html><body>
+    <h1>47 Shore Street   Russell Island QLD 4184</h1>
+    <div>3 Bed</div>
+    $475,000
+    </body></html>
+    """
+    result = et.try_wordpress_epl_pattern(real_active_html)
+    assert result is not None
+    assert result["price"] == "475000"
+    assert result["suburb"] == "Russell Island"
+    assert result["status"] == ""
+
+    real_sold_html = """
+    <html><body>
+    <h1>506/19 Hope Street   South Brisbane QLD 4101</h1>
+    Sold
+    $650,000
+    </body></html>
+    """
+    sold_result = et.try_wordpress_epl_pattern(real_sold_html)
+    assert sold_result["status"] == "Sold"
+    assert sold_result["price"] == "650000"
+    print("PASS: tier 3h (WordPress EPL pattern) correctly parses both active and sold listings")
+
+
+def test_tier3g_eagle_software_no_longer_collides_with_other_h1_based_tiers():
+    """
+    Regression test for a REAL BUG found while building tier 3h
+    (June 24, 2026): try_eagle_software_pattern() originally matched
+    ANY page with an <h1>, even with no <h2> price found at all,
+    silently returning an empty price. This made it incorrectly
+    "win" the match on a DIFFERENT site (Woolloongabba Real Estate,
+    WordPress EPL plugin) that also uses a plain <h1> for the address
+    but puts its price as nearby plain text, not inside an <h2> —
+    since Eagle Software's tier ran first in the pipeline, it stole
+    the match with wrong/empty data instead of letting the correct
+    tier (3h) handle it. Fixed by requiring the actual <h2> price
+    element — Eagle Software's real, distinguishing signature — to be
+    found before claiming a match at all.
+    """
+    epl_style_html = """
+    <html><body>
+    <h1>47 Shore Street   Russell Island QLD 4184</h1>
+    <div>3 Bed</div>
+    $475,000
+    </body></html>
+    """
+    result = et.try_eagle_software_pattern(epl_style_html)
+    assert result is None, (
+        f"FAIL: Eagle Software should step aside when there's no real <h2> price, "
+        f"but it matched: {result}"
+    )
+
+    # Confirm Eagle Software's OWN real confirmed structure still works
+    eagle_html = """
+    <html><body>
+    <h1>2 Chisholm Avenue, Clemton Park</h1>
+    <h2>$1,827,000</h2>
+    </body></html>
+    """
+    eagle_result = et.try_eagle_software_pattern(eagle_html)
+    assert eagle_result is not None
+    assert eagle_result["price"] == "1827000"
+
+    # Confirm the full pipeline now correctly routes to tier 3h, not 3g, for the EPL-style page
+    full_result = et.extract_listing_fields(
+        epl_style_html,
+        "https://woolloongabbarealestate.com.au/properties-for-sale/47-shore-street-russell-island-qld-4184/",
+    )
+    assert full_result["tier"] == "wordpress_epl_pattern", (
+        f"FAIL: full pipeline should route to tier 3h, got {full_result['tier']!r}"
+    )
+    print("PASS: Eagle Software no longer collides with other h1-based tiers — "
+          "requires its own real <h2> price signature to match, own real case still works")
+
+
 def test_tier3g_eagle_software_pattern():
     """
     Confirmed real pattern (Living Estate Agents, platform: Eagle
@@ -442,6 +531,8 @@ if __name__ == "__main__":
     test_tier3e_semibold_muted_pattern()
     test_tier3f_renet_hidden_input_pattern()
     test_tier3g_eagle_software_pattern()
+    test_tier3h_wordpress_epl_pattern()
+    test_tier3g_eagle_software_no_longer_collides_with_other_h1_based_tiers()
     test_tier3d_contract_field_with_whitespace_between_tags()
     test_tier3c_generic_scan()
     test_priority_order_json_ld_beats_everything()

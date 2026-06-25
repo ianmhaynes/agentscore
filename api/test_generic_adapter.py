@@ -249,6 +249,41 @@ def test_id_first_slug_url_pattern():
           "numeric-segment-after-ID edge case")
 
 
+def test_wordpress_epl_url_pattern_narrowly_scoped():
+    """
+    Confirmed real exception (Woolloongabba Real Estate, WordPress
+    "EPL" plugin — June 24, 2026): real listing URLs are
+    "/properties-for-sale/{full-address-slug-ending-in-postcode}/".
+    The trailing 4-digit number is a POSTCODE, not a listing ID — a
+    naive "ends in 4+ digits" rule would ALSO match real nav links
+    like "/properties-for-sale/?action=epl_search..." in OTHER
+    postcode-shaped contexts. This exception is intentionally narrow:
+    it requires the specific "/properties-for-sale/" prefix AND a real
+    slug (not a query string) — confirmed via testing that it accepts
+    real listings while still rejecting the real nav link with a "?"
+    immediately after the same prefix.
+    """
+    adapter = GenericFallbackAdapter()
+    domain = "https://woolloongabbarealestate.com.au"
+
+    real_listing = "https://woolloongabbarealestate.com.au/properties-for-sale/506-19-hope-street-south-brisbane-qld-4101/"
+    assert adapter._looks_like_listing_url(real_listing, domain), "FAIL: should accept the real listing URL"
+
+    nav_query_string = "https://woolloongabbarealestate.com.au/properties-for-sale/?action=epl_search&post_type=property&property_status=current"
+    assert not adapter._looks_like_listing_url(nav_query_string, domain), (
+        "FAIL: should reject the real nav link with a query string, same prefix as a real listing"
+    )
+
+    nav_other = "https://woolloongabbarealestate.com.au/open-homes/"
+    assert not adapter._looks_like_listing_url(nav_other, domain)
+
+    real_listing2 = "https://woolloongabbarealestate.com.au/properties-for-sale/306-18-hubert-street-woolloongabba-queensland-4102/"
+    assert adapter._looks_like_listing_url(real_listing2, domain), "FAIL: should accept a second real listing URL"
+
+    print("PASS: WordPress EPL URL pattern correctly accepts real listings, "
+          "correctly rejects the real nav link sharing the same path prefix")
+
+
 def test_eagle_software_property_id_url_pattern():
     """
     Confirmed real exception (Living Estate Agents, platform: Eagle
@@ -499,6 +534,7 @@ if __name__ == "__main__":
     test_collect_listing_urls_handles_relative_hrefs()
     test_wordpress_plugin_calendar_urls_excluded()
     test_id_first_slug_url_pattern()
+    test_wordpress_epl_url_pattern_narrowly_scoped()
     test_eagle_software_property_id_url_pattern()
     test_protocol_relative_urls_resolved_without_doubling()
     test_other_real_url_styles_unaffected_by_protocol_relative_fix()

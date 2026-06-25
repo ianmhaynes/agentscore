@@ -547,6 +547,54 @@ every significant regional city, sourced from population data) is the
 starting input for covering Queensland broadly without being
 needlessly exhaustive down to tiny towns.
 
+## Woolloongabba Real Estate — WordPress EPL plugin, plus a real tier-collision bug found and fixed (June 24, 2026)
+
+Investigated why `woolloongabbarealestate.com.au` (a real office seeded
+via the QLD bulk discovery, picked up by the live cron job) succeeded
+with zero listings, in the context of a broader question about whether
+Browserless should be used MORE broadly. Confirmed via direct fetch
+this is a plain WordPress site using the "EPL" real estate plugin
+(confirmed via `?action=epl_search&post_type=property` query params on
+the site's own nav links) — listings are fully server-rendered right
+on the homepage, no JavaScript needed at all. This reinforced the
+existing decision to keep Browserless as a small-minority fallback,
+not a default — see the dedicated cost analysis below.
+
+**A real, deliberately-narrow URL exception was needed**: real listing
+URLs are `/properties-for-sale/{full-address-slug-ending-in-postcode}/`
+— e.g. `/properties-for-sale/506-19-hope-street-south-brisbane-qld-4101/`.
+The trailing 4-digit number is a POSTCODE, not a listing ID. The
+existing general trailing-numeric-ID rule would ALSO match this
+(correctly, by coincidence) — but it would just as easily match OTHER
+postcode-ending nav links that aren't listings at all, since "ends in
+4 digits" is an extremely common, generic pattern for any Australian
+address-shaped URL. Added a deliberately narrow exception requiring
+the specific `/properties-for-sale/` prefix AND a genuine slug (not a
+query string) — confirmed via testing it accepts real listings while
+correctly rejecting the real nav link sharing the exact same prefix
+(`/properties-for-sale/?action=epl_search...`).
+
+**Tier 3h (WordPress EPL pattern)** added: address in a plain `<h1>`
+(full street + suburb + state + postcode, multiple spaces between
+street and suburb in the real rendered text), price as plain text
+nearby. Built GENERICALLY rather than guessing specific CSS classes,
+since only markdown-converted page content was available to confirm
+this structure, not verified raw HTML — a deliberate choice given a
+previous session's exact-class-guessing mistakes (built from converted
+content, not raw bytes) caused a real multi-hour debugging issue.
+
+**A real, important tier-collision bug found while building tier 3h**:
+the existing Eagle Software tier (3g) matched ANY page with a plain
+`<h1>`, even when its own confirmed signature (a price inside an
+`<h2>`) was absent — silently returning an empty price rather than
+stepping aside. Since it ran earlier in the pipeline, it was
+incorrectly "winning" the match on Woolloongabba's pages too, with
+wrong/empty data, instead of letting tier 3h's correct logic handle
+it. Fixed by requiring Eagle Software's own real distinguishing
+signature to actually be found before claiming a match — a real
+reminder that overly permissive matching in one tier can silently
+suppress a different, more correct tier later in the same pipeline.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style
