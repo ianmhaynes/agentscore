@@ -677,6 +677,48 @@ def test_tier3j_wordpress_epl_structured_variant():
           "including the HTML-entity dollar sign, with no collision against the simpler variant")
 
 
+def test_tier3k_elders_franchise_pattern():
+    """
+    Confirmed real pattern (Elders Smith and Elliott Townsville
+    franchise office — June 25, 2026): street ALONE in the h1, suburb
+    + state + postcode in the FOLLOWING h2 — distinct from Eagle
+    Software's pattern (3g), which expects the h2 to contain the
+    PRICE, not the suburb. Confirmed real collision found via live
+    testing: Eagle Software's original tier matched this page first
+    (any h1 + any h2 was enough), extracting only the street with no
+    suburb/postcode/price at all.
+    """
+    real_html = """
+    <html><body>
+    <h1>15/3 Stanton Terrace</h1>
+    <h2>Townsville City QLD 4810</h2>
+    <div>3 Bed</div>
+    Offers over $699,000
+    </body></html>
+    """
+    result = et.extract_listing_fields(
+        real_html,
+        "https://smithandelliott.eldersrealestate.com.au/residential/sale/153-stanton-terrace-townsville-city-qld-4810-300P197394/",
+    )
+    assert result["tier"] == "elders_franchise_pattern", f"FAIL: got {result['tier']!r}"
+    assert result["suburb"] == "Townsville City"
+    assert result["postcode"] == "4810"
+    assert result["price"] == "699000"
+
+    # Confirm Eagle Software's own real case still works unaffected
+    eagle_html = """
+    <html><body>
+    <h1>2 Chisholm Avenue, Clemton Park</h1>
+    <h2>$1,827,000</h2>
+    </body></html>
+    """
+    eagle_result = et.try_eagle_software_pattern(eagle_html)
+    assert eagle_result is not None
+    assert eagle_result["price"] == "1827000"
+    print("PASS: tier 3k (Elders franchise) correctly extracts address/suburb/postcode/price, "
+          "no collision with Eagle Software's own real case")
+
+
 def test_tier3g_eagle_software_pattern():
     """
     Confirmed real pattern (Living Estate Agents, platform: Eagle
@@ -805,6 +847,7 @@ if __name__ == "__main__":
     test_tier3d_reapit_agentbox_unchanged_by_kangaroo_point_investigation()
     test_tier3h_wordpress_epl_handles_comma_based_suburb_format()
     test_tier3j_wordpress_epl_structured_variant()
+    test_tier3k_elders_franchise_pattern()
     test_tier3d_contract_field_with_whitespace_between_tags()
     test_tier3c_generic_scan()
     test_priority_order_json_ld_beats_everything()

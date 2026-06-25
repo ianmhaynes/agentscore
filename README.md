@@ -747,20 +747,23 @@ working pattern while the real underlying HTML is genuinely
 different** — only real raw bytes, fetched directly, can confirm a
 fix actually works.
 
-## KNOWN GAP — robots.txt compliance not yet implemented (June 24, 2026)
+## KNOWN GAP — robots.txt compliance not yet implemented (confirmed TWICE, June 24-25, 2026)
 
-Confirmed real gap found while investigating `spp.net.au` as a zero-
-listing office: its `robots.txt` explicitly disallows automated
-access, but the production scraper has NO robots.txt checking
-anywhere in the codebase — meaning this site (and possibly others)
-has likely been scraped in production despite its explicit opt-out.
-Deliberately deferred fixing this immediately (noted here instead) to
-keep working through other zero-listing offices, but this is a real,
-not-yet-addressed compliance gap, not a stylistic preference — worth
-prioritizing properly in a dedicated session: check `{domain}/robots.txt`
+Confirmed real gap, now hit on TWO separate real sites:
+`spp.net.au` (June 24) and `townsville.century21.com.au` (June 25) —
+both explicitly disallow automated access via `robots.txt`, but the
+production scraper has NO robots.txt checking anywhere in the
+codebase. Both times, the scraper attempted access anyway (the second
+case returned zero listings, but coincidentally — not because the
+disallow was respected). Deliberately deferred fixing this immediately
+both times to keep working through other zero-listing offices, but
+this is now a confirmed, RECURRING compliance gap, not a one-off edge
+case — worth treating as a real priority for the next dedicated
+session, not something to defer a third time: check `{domain}/robots.txt`
 before scraping any office, respect `Disallow` rules for the paths
 being accessed, and likely add a `robots_disallowed` office status so
-affected offices are visibly excluded rather than silently skipped.
+affected offices are visibly excluded rather than silently skipped or
+coincidentally returning zero.
 
 ## Three genuine non-fixes, and a real Rex Websites generalization gap (June 25, 2026)
 
@@ -800,6 +803,32 @@ the ID as its own complete path segment, distinct from every other
 confirmed pattern in this module (which all hyphenate the ID into the
 slug). Added this as a new, narrow exception; confirmed real nav links
 (`/properties-for-sale`, `/team/{name}`) are still correctly rejected.
+
+## Elders Smith and Elliott Townsville — a fourth real h1/h2 collision found and fixed (June 25, 2026)
+
+Investigated `smithandelliott.eldersrealestate.com.au`, a confirmed
+real Elders franchise office with listings directly on the homepage.
+Real listing URLs end in a letter-mixed-with-digits trailing ID (e.g.
+`...-qld-4810-300P197394/`) — added a scoped URL exception specific to
+the confirmed `/residential/{sale|rent|sold}/` path prefix.
+
+**A fourth real h1/h2 tier collision**: the real detail page structure
+splits the address across an `<h1>` (street only) and a following
+`<h2>` (suburb + state + postcode) — but Eagle Software's existing
+tier (built for a DIFFERENT site where the h2 contains the PRICE, not
+the suburb) matched this page first, since it only required "any h1 +
+any h2" to claim a match, extracting just the bare street with no
+suburb, postcode, or price at all. Added a new, more specific tier
+(3k) checked BEFORE Eagle Software, requiring the exact
+"{Suburb} {STATE} {postcode}" shape in the h2 — Eagle Software's own
+real case (price in the h2) doesn't match this shape, so both tiers
+now coexist correctly. This is the fourth time today this same class
+of bug has appeared (after Eagle Software/WordPress EPL, WordPress
+EPL/Rex Websites, and Reapit/Agentbox's near-miss) — confirming the
+real, recurring lesson: **any new tier sharing a structural shape
+(heading + heading, or heading + nearby price) with an existing tier
+must be checked for collision against every existing tier with that
+same shape, not just tested in isolation.**
 
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 

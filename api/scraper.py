@@ -856,6 +856,10 @@ class GenericFallbackAdapter:
         # path, on a different WordPress real estate plugin/theme than
         # the EPL plugin confirmed earlier today.
         "/sold-residential", "/current-residential-for-sale",
+        # Confirmed real paths (Elders Smith and Elliott Townsville
+        # franchise office — June 25, 2026): real listings found
+        # directly on the homepage and via these index paths.
+        "/residential/sale", "/residential/sold", "/residential/rent",
     ]
 
     def __init__(self, llm_api_key=None, browserless_api_key=None):
@@ -1001,6 +1005,18 @@ class GenericFallbackAdapter:
         # path segment, not hyphenated into the slug at all (distinct
         # from every other confirmed pattern in this module so far).
         if re.match(r"^/\d{4,}/[a-z0-9-]+/?$", path, re.IGNORECASE):
+            return True
+        # Confirmed exception (Elders Smith and Elliott Townsville
+        # franchise office — June 25, 2026): listing URLs end in a
+        # LETTER-PREFIXED trailing ID — e.g.
+        # "/residential/sale/153-stanton-terrace-townsville-city-qld-
+        # 4810-300P197394/" — the trailing "300P197394" mixes a letter
+        # with digits, so the general purely-numeric trailing-ID rule
+        # below doesn't match it. Scoped specifically to the confirmed
+        # "/residential/{sale|rent|sold}/" path prefix to avoid
+        # accidentally matching unrelated letter+digit suffixes
+        # elsewhere on a page.
+        if re.search(r"/residential/(?:sale|rent|sold)/[a-z0-9-]+-\d*[A-Za-z]\d{4,}/?$", path, re.IGNORECASE):
             return True
         return bool(re.search(r"[-/]\d{4,}/?$", path))
 

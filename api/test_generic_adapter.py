@@ -249,6 +249,16 @@ def test_id_first_slug_url_pattern():
           "numeric-segment-after-ID edge case")
 
 
+def test_elders_franchise_index_paths_in_candidate_list():
+    """Confirmed real paths (Elders Smith and Elliott Townsville
+    franchise office — June 25, 2026)."""
+    adapter = GenericFallbackAdapter()
+    assert "/residential/sale" in adapter.CANDIDATE_INDEX_PATHS
+    assert "/residential/sold" in adapter.CANDIDATE_INDEX_PATHS
+    assert "/residential/rent" in adapter.CANDIDATE_INDEX_PATHS
+    print("PASS: Elders franchise index paths present in the candidate list")
+
+
 def test_melita_bell_index_paths_in_candidate_list():
     """
     Confirmed real paths (The Melita Bell Team, RE/MAX Success
@@ -276,6 +286,36 @@ def test_rex_websites_index_path_in_candidate_list():
         "The confirmed real Rex Websites sold-listings path must be in CANDIDATE_INDEX_PATHS"
     )
     print("PASS: Rex Websites sold-listings index path is present in the candidate list")
+
+
+def test_elders_franchise_url_pattern():
+    """
+    Confirmed real exception (Elders Smith and Elliott Townsville
+    franchise office — June 25, 2026): listing URLs end in a LETTER-
+    PREFIXED trailing ID — e.g.
+    "/residential/sale/153-stanton-terrace-townsville-city-qld-4810-
+    300P197394/" — the trailing "300P197394" mixes digits and a letter
+    in a way the general purely-numeric trailing-ID rule misses.
+    """
+    adapter = GenericFallbackAdapter()
+    domain = "https://smithandelliott.eldersrealestate.com.au"
+
+    real_urls = [
+        "https://smithandelliott.eldersrealestate.com.au/residential/sale/153-stanton-terrace-townsville-city-qld-4810-300P197394/",
+        "https://smithandelliott.eldersrealestate.com.au/residential/rent/47-first-street-railway-estate-qld-4810-300P198511/",
+        "https://smithandelliott.eldersrealestate.com.au/residential/sale/12-electus-street-condon-qld-4815-300P196775/",
+    ]
+    for url in real_urls:
+        assert adapter._looks_like_listing_url(url, domain), f"FAIL: should accept {url}"
+
+    nav_urls = [
+        "https://smithandelliott.eldersrealestate.com.au/residential/sale/",
+        "https://smithandelliott.eldersrealestate.com.au/team/katherine-roy/",
+    ]
+    for url in nav_urls:
+        assert not adapter._looks_like_listing_url(url, domain), f"FAIL: should reject {url}"
+
+    print("PASS: Elders franchise URL pattern correctly accepted, real nav links rejected")
 
 
 def test_century21_pushcreative_url_pattern():
@@ -648,11 +688,13 @@ if __name__ == "__main__":
     test_collect_listing_urls_handles_relative_hrefs()
     test_wordpress_plugin_calendar_urls_excluded()
     test_id_first_slug_url_pattern()
+    test_elders_franchise_index_paths_in_candidate_list()
     test_melita_bell_index_paths_in_candidate_list()
     test_rex_websites_index_path_in_candidate_list()
     test_rex_websites_url_pattern()
     test_rex_websites_url_pattern_handles_multiple_real_id_formats()
     test_century21_pushcreative_url_pattern()
+    test_elders_franchise_url_pattern()
     test_wordpress_epl_url_pattern_narrowly_scoped()
     test_eagle_software_property_id_url_pattern()
     test_protocol_relative_urls_resolved_without_doubling()

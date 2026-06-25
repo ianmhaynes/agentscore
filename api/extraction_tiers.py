@@ -620,6 +620,64 @@ def try_rex_websites_pattern(html, log=None):
     }
 
 
+def try_elders_franchise_pattern(html, log=None):
+    """
+    Tier 3k. Confirmed real pattern (Elders Smith and Elliott
+    Townsville franchise office — June 25, 2026):
+        <h1>15/3 Stanton Terrace</h1>
+        <h2>Townsville City QLD 4810</h2>
+        ...bed/bath/car...
+        Offers over $699,000
+    Street address ALONE in the h1 (no suburb at all), with suburb +
+    state + postcode in the FOLLOWING h2 — distinct from the Eagle
+    Software tier (3g), which expects the h2 to contain the PRICE, not
+    the suburb. Confirmed real collision: Eagle Software's tier
+    originally matched this page first (any h1 + any h2 is enough for
+    it to claim a match), extracting only the street with no suburb/
+    postcode/price at all. Checked specifically for the real
+    "{Suburb} {STATE} {postcode}" shape in the h2 to distinguish this
+    pattern from Eagle Software's price-in-h2 shape.
+    """
+    addr_match = re.search(r"<h1[^>]*>([^<]+)</h1>", html)
+    if not addr_match:
+        return None
+    street = addr_match.group(1).strip()
+    if not street:
+        return None
+
+    after_h1 = html[addr_match.end():addr_match.end() + 300]
+    suburb_match = re.search(r"<h2[^>]*>([A-Za-z\s]+?)\s+([A-Z]{2,3})\s+(\d{4})</h2>", after_h1)
+    if not suburb_match:
+        # Without this specific suburb-state-postcode shape in the h2,
+        # this isn't confirmed to be the real Elders pattern — step
+        # aside rather than risk colliding with a different h1+h2 tier.
+        return None
+    suburb = suburb_match.group(1).strip()
+    state = suburb_match.group(2)
+    postcode = suburb_match.group(3)
+
+    address = f"{street}, {suburb} {state} {postcode}"
+
+    after_suburb = html[addr_match.end() + suburb_match.end():addr_match.end() + suburb_match.end() + 500]
+    price_match = re.search(r"\$\s*[\d,]+", after_suburb)
+    price = _parse_price(price_match.group(0)) if price_match else ""
+
+    status = ""
+    if re.search(r"\bsold\b", after_suburb, re.IGNORECASE):
+        status = "Sold"
+
+    if log:
+        log("    [tier 3k: Elders franchise pattern - h1 street + h2 suburb/state/postcode] matched")
+    return {
+        "address": address,
+        "suburb": suburb,
+        "postcode": postcode,
+        "price": price,
+        "status": status,
+        "tier": "elders_franchise_pattern",
+    }
+
+
 def try_eagle_software_pattern(html, log=None):
     """
     Tier 3g. Confirmed real pattern (Living Estate Agents, platform:
@@ -958,6 +1016,7 @@ def extract_listing_fields(html, listing_url, log=None, llm_api_key=None):
         try_reapit_agentbox_pattern,
         try_semibold_muted_pattern,
         try_renet_hidden_input_pattern,
+        try_elders_franchise_pattern,
         try_eagle_software_pattern,
         try_wordpress_epl_structured_pattern,
         try_wordpress_epl_pattern,
