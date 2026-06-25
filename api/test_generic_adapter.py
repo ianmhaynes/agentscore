@@ -278,6 +278,38 @@ def test_rex_websites_index_path_in_candidate_list():
     print("PASS: Rex Websites sold-listings index path is present in the candidate list")
 
 
+def test_century21_pushcreative_url_pattern():
+    """
+    Confirmed real exception (Century 21 Aaron Moon Realty /
+    Townsville, platform built by "Push Creative" — confirmed via real
+    footer credit, June 25, 2026): listing URLs are
+    "/{numeric-id}/{address-slug}" — the ID as its OWN complete path
+    segment, not hyphenated into the slug. Confirmed working with
+    EXISTING tier 2 (meta tags) — no new extraction tier needed, since
+    this platform provides complete OpenGraph address data
+    (og:street-address, og:locality, og:postal-code, og:region); the
+    only real gap was URL discovery.
+    """
+    adapter = GenericFallbackAdapter()
+    domain = "https://century21townsville.com.au"
+
+    real_urls = [
+        "https://century21townsville.com.au/628653/5-lakefield-drive-idalia",
+        "https://century21townsville.com.au/615928/37-thunderbolt-drive-oak-valley",
+    ]
+    for url in real_urls:
+        assert adapter._looks_like_listing_url(url, domain), f"FAIL: should accept {url}"
+
+    nav_urls = [
+        "https://century21townsville.com.au/properties-for-sale",
+        "https://century21townsville.com.au/team/katrina-mersky",
+    ]
+    for url in nav_urls:
+        assert not adapter._looks_like_listing_url(url, domain), f"FAIL: should reject {url}"
+
+    print("PASS: Century 21 / Push Creative URL pattern correctly accepted, real nav links rejected")
+
+
 def test_rex_websites_url_pattern_handles_multiple_real_id_formats():
     """
     Confirmed real generalization gap (Abra Agencies, June 25, 2026):
@@ -620,6 +652,7 @@ if __name__ == "__main__":
     test_rex_websites_index_path_in_candidate_list()
     test_rex_websites_url_pattern()
     test_rex_websites_url_pattern_handles_multiple_real_id_formats()
+    test_century21_pushcreative_url_pattern()
     test_wordpress_epl_url_pattern_narrowly_scoped()
     test_eagle_software_property_id_url_pattern()
     test_protocol_relative_urls_resolved_without_doubling()

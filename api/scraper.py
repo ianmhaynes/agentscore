@@ -994,6 +994,14 @@ class GenericFallbackAdapter:
         # product from the same company, and is fully server-rendered.
         if re.search(r"/listings/[a-z_]+-(?:[A-Za-z]+\d*-)?[A-Za-z0-9]{4,}-[a-z]", path, re.IGNORECASE):
             return True
+        # Confirmed exception (Century 21 Aaron Moon Realty / Townsville,
+        # platform built by "Push Creative" — confirmed via real footer
+        # credit, June 25, 2026): listing URLs are
+        # "/{numeric-id}/{address-slug}" — the ID as its OWN complete
+        # path segment, not hyphenated into the slug at all (distinct
+        # from every other confirmed pattern in this module so far).
+        if re.match(r"^/\d{4,}/[a-z0-9-]+/?$", path, re.IGNORECASE):
+            return True
         return bool(re.search(r"[-/]\d{4,}/?$", path))
 
     def _collect_listing_urls(self, html, domain):

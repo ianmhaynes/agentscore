@@ -785,6 +785,22 @@ format and these new single-segment letter-prefixed formats, without
 losing the original confirmed case — confirmed via testing both
 formats together, plus the real nav links that must still be rejected.
 
+## Century 21 Townsville / Push Creative — clean win, existing tier already worked (June 25, 2026)
+
+Investigated `townsville.century21.com.au` (redirects to
+`century21townsville.com.au`), built by a platform called "Push
+Creative" (confirmed via real footer credit). Real listings sit
+directly on the homepage with complete real prices, addresses, and
+bed/bath/car counts. The detail page provides COMPLETE real OpenGraph
+metadata (`og:street-address`, `og:locality`, `og:postal-code`,
+`og:region`) — confirmed the EXISTING tier 2 (meta tags) already
+extracts this correctly with zero changes needed. The only real gap
+was URL discovery: listing URLs use `/{numeric-id}/{address-slug}` —
+the ID as its own complete path segment, distinct from every other
+confirmed pattern in this module (which all hyphenate the ID into the
+slug). Added this as a new, narrow exception; confirmed real nav links
+(`/properties-for-sale`, `/team/{name}`) are still correctly rejected.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style
