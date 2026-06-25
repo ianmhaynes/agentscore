@@ -692,14 +692,34 @@ def test_tier3k_elders_franchise_wins_over_general_features_h4():
     fix already applied to the Rex Websites/Reapit-Agentbox collision.
     """
     real_html_with_general_features_h4 = """
-    <html><body>
-    <h1>15/3 Stanton Terrace</h1>
-    <h2>Townsville City QLD 4810</h2>
-    <div>3 Bed</div>
-    Offers over $699,000
-    <h4>General Features</h4>
-    <ul><li>Property Type: Unit</li></ul>
-    </body></html>
+                        <h1 class="property__title">
+              15/3 Stanton Terrace
+            </h1>
+                        <h2 class="property__subtitle">
+                          Townsville City QLD 4810
+                      </h2>
+                        <ul class="property-card__key-features property__key-features">
+                          <li class="property-card__key-feature property-card__key-feature--bed">3
+                  <span class="property-card__key-feature-label">Bed</span></li>
+            </ul>
+
+          <div class="property__price">
+            Offers over $699,000
+          </div>
+          <section class="property__section property__content">
+    BC -  $10,309 pa (approx)<br>
+          </section>
+          <section class="property__section property__content">
+            <h3>Features</h3>
+            <div class="row">
+              <div class="col-12 col-md-6 mb-0">
+                <h4 class="property__content-subheading">
+                  General Features
+                </h4>
+                <ul><li>Property Type: Unit</li></ul>
+              </div>
+            </div>
+          </section>
     """
     result = et.extract_listing_fields(
         real_html_with_general_features_h4,
@@ -720,18 +740,47 @@ def test_tier3k_elders_franchise_pattern():
     franchise office — June 25, 2026): street ALONE in the h1, suburb
     + state + postcode in the FOLLOWING h2 — distinct from Eagle
     Software's pattern (3g), which expects the h2 to contain the
-    PRICE, not the suburb. Confirmed real collision found via live
-    testing: Eagle Software's original tier matched this page first
-    (any h1 + any h2 was enough), extracting only the street with no
-    suburb/postcode/price at all.
+    PRICE, not the suburb.
+
+    Fixture below is the EXACT real raw HTML confirmed via a direct
+    curl against the live site — not a markdown-converted guess. Two
+    real bugs were found and fixed using this real evidence, both
+    invisible to an earlier, simplified fixture:
+    1. The real distance from the h2 close tag to the price text is
+       ~798 characters (through a real bed/bath/car <ul> block) — the
+       original 500-char search window never reached it at all.
+    2. The page body further down contains OTHER real dollar amounts
+       that are NOT the listing price (a body corporate fee, council
+       rates, a rental appraisal range) — included here specifically
+       to confirm the fix doesn't accidentally grab one of these.
     """
     real_html = """
-    <html><body>
-    <h1>15/3 Stanton Terrace</h1>
-    <h2>Townsville City QLD 4810</h2>
-    <div>3 Bed</div>
-    Offers over $699,000
-    </body></html>
+                        <h1 class="property__title">
+              15/3 Stanton Terrace
+            </h1>
+                        <h2 class="property__subtitle">
+                          Townsville City QLD 4810
+                      </h2>
+                        <ul class="property-card__key-features property__key-features">
+                          <li class="property-card__key-feature property-card__key-feature--bed">3
+                  <span class="property-card__key-feature-label">Bed</span></li>
+                          <li class="property-card__key-feature property-card__key-feature--bath">2
+                  <span class="property-card__key-feature-label">Bath</span></li>
+                        <li class="property-card__key-feature property-card__key-feature--car">2
+                <span class="property-card__key-feature-label">
+                                      Parks
+                                </span>
+              </li>
+            </ul>
+
+          <div class="property__price">
+            Offers over $699,000
+          </div>
+          <section class="property__section property__content">
+    BC -  $10,309 pa (approx) includes 20% discount if paid by due date<br>
+    RATES -  $3871.70 pa (approx)<br>
+    Rent Appraisal  $760 - $780pw
+          </section>
     """
     result = et.extract_listing_fields(
         real_html,
@@ -740,7 +789,10 @@ def test_tier3k_elders_franchise_pattern():
     assert result["tier"] == "elders_franchise_pattern", f"FAIL: got {result['tier']!r}"
     assert result["suburb"] == "Townsville City"
     assert result["postcode"] == "4810"
-    assert result["price"] == "699000"
+    assert result["price"] == "699000", (
+        f"FAIL: got {result['price']!r} — may have grabbed the BC fee ($10,309), "
+        f"rates ($3871.70), or rent appraisal ($760-$780) instead of the real listing price"
+    )
 
     # Confirm Eagle Software's own real case still works unaffected
     eagle_html = """

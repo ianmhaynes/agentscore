@@ -845,6 +845,32 @@ Websites/Reapit-Agentbox collision. Confirmed via a real fixture
 including the actual "General Features" h4 text, not just the
 original isolated h1/h2 fixture that didn't expose this gap.
 
+**The pipeline-ordering fix above genuinely fixed the tier-collision
+issue, but the price was STILL not extracted correctly** — confirmed
+via a real direct curl of the live detail page (not a markdown
+conversion), which revealed two further real bugs invisible to every
+prior fixture:
+1. **Distance bug**: the real character distance from the suburb's
+   `</h2>` to the actual price text is ~798 characters (through a
+   real bed/bath/car `<ul>` block) — beyond the original 500-character
+   search window, so the price was never found at all.
+2. **Wrong-amount risk**: the real page body contains OTHER genuine
+   dollar amounts that are NOT the listing price — a body corporate
+   fee ("BC - $10,309 pa"), council rates ("RATES - $3871.70 pa"), and
+   a rental appraisal range ("Rent Appraisal $760 - $780pw") — a
+   generic nearby-$ scan with a wider window would have risked
+   grabbing one of these instead.
+
+Fixed by targeting the confirmed real `class="property__price"`
+element directly, rather than any proximity-based `$` scan — both
+correct regardless of exact character distance, and safe against the
+BC/rates/rent-appraisal trap text, since it only ever looks inside
+that one specific, real, confirmed element. Every test fixture for
+this tier was also rebuilt using the exact real raw HTML from the
+curl output (including realistic whitespace, the real bed/bath/car
+block, and the genuine trap text), replacing the earlier, oversimplified
+fixtures that had let two real bugs ship silently.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style

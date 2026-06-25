@@ -646,7 +646,9 @@ def try_elders_franchise_pattern(html, log=None):
         return None
 
     after_h1 = html[addr_match.end():addr_match.end() + 300]
-    suburb_match = re.search(r"<h2[^>]*>([A-Za-z\s]+?)\s+([A-Z]{2,3})\s+(\d{4})</h2>", after_h1)
+    suburb_match = re.search(
+        r"<h2[^>]*>\s*([A-Za-z\s]+?)\s+([A-Z]{2,3})\s+(\d{4})\s*</h2>", after_h1
+    )
     if not suburb_match:
         # Without this specific suburb-state-postcode shape in the h2,
         # this isn't confirmed to be the real Elders pattern — step
@@ -658,13 +660,34 @@ def try_elders_franchise_pattern(html, log=None):
 
     address = f"{street}, {suburb} {state} {postcode}"
 
-    after_suburb = html[addr_match.end() + suburb_match.end():addr_match.end() + suburb_match.end() + 500]
-    price_match = re.search(r"\$\s*[\d,]+", after_suburb)
-    price = _parse_price(price_match.group(0)) if price_match else ""
-
+    # CONFIRMED REAL BUGS found via direct curl against the live site
+    # (June 25, 2026), not a markdown-converted guess:
+    # 1. The real distance from the h2 close tag to the price text is
+    #    ~798 characters (through a bed/bath/car <ul> block) — beyond
+    #    the original 500-character search window, so the price was
+    #    NEVER found at all regardless of any other bug.
+    # 2. The page body text further down contains OTHER real dollar
+    #    amounts that are NOT the listing price — body corporate fees
+    #    ("BC - $10,309 pa"), council rates ("RATES - $3871.70 pa"),
+    #    and a rental appraisal range ("Rent Appraisal $760 - $780pw")
+    #    — a generic nearby-$ scan risks grabbing one of these instead
+    #    of the real price if the window were simply widened.
+    # Fixed by targeting the specific confirmed real
+    # class="property__price" element directly, rather than a
+    # generic proximity-based $ scan — both safer (can't accidentally
+    # match BC/rates/rent-appraisal text elsewhere on the page) and
+    # correct regardless of exact character distance.
+    after_h1_full = html[addr_match.end():]
+    price_div_match = re.search(
+        r'class="[^"]*property__price[^"]*"[^>]*>\s*([^<]+?)\s*<', after_h1_full
+    )
+    price = ""
     status = ""
-    if re.search(r"\bsold\b", after_suburb, re.IGNORECASE):
-        status = "Sold"
+    if price_div_match:
+        price_text = price_div_match.group(1)
+        price = _parse_price(price_text)
+        if price_text.strip().lower().startswith("sold"):
+            status = "Sold"
 
     if log:
         log("    [tier 3k: Elders franchise pattern - h1 street + h2 suburb/state/postcode] matched")
