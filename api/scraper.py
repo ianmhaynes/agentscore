@@ -977,17 +977,22 @@ class GenericFallbackAdapter:
         # "?" immediately after the prefix, no real slug at all).
         if re.match(r"^/properties-for-sale/[^?]+/$", path):
             return True
-        # Confirmed exception (Kangaroo Point Real Estate, platform:
-        # Rex Websites — confirmed via "Powered by Rex Websites" footer
-        # credit, June 24, 2026): listing URLs are
-        # "/listings/residential_sale-R2-{id}-{suburb-slug}" — the
-        # numeric ID sits in the MIDDLE of the slug (after "R2-"),
-        # followed by more text (the suburb), not at the very end of
-        # the path. Distinct from BresicWhitney's Rex CRM (a JS-gated
-        # dead end, confirmed in an earlier session) — "Rex Websites"
-        # is a different product from the same company, and is fully
-        # server-rendered.
-        if re.search(r"/listings/[a-z_]+-R\d-\d{4,}-[a-z]", path, re.IGNORECASE):
+        # Confirmed exception (Rex Websites platform — confirmed via
+        # "Powered by Rex Websites" footer credit on multiple real
+        # offices, June 24-25, 2026): listing URLs are
+        # "/listings/{type}_{saleOrRental}-{id}-{suburb-slug}". The
+        # original fix (Kangaroo Point Real Estate) only confirmed the
+        # "R2-{numeric}" ID format; a second real office (Abra
+        # Agencies) confirmed the SAME platform also uses letter-
+        # prefixed ID formats like "QTW27006" and "L18768190" — Rex
+        # Websites apparently supports multiple ID schemes across
+        # different customer accounts. Broadened to accept any
+        # alphanumeric ID (letters and/or digits) in this position,
+        # not just the original numeric-after-"R2-" pattern. Distinct
+        # from BresicWhitney's Rex CRM (a JS-gated dead end, confirmed
+        # in an earlier session) — "Rex Websites" is a different
+        # product from the same company, and is fully server-rendered.
+        if re.search(r"/listings/[a-z_]+-(?:[A-Za-z]+\d*-)?[A-Za-z0-9]{4,}-[a-z]", path, re.IGNORECASE):
             return True
         return bool(re.search(r"[-/]\d{4,}/?$", path))
 

@@ -747,6 +747,44 @@ working pattern while the real underlying HTML is genuinely
 different** — only real raw bytes, fetched directly, can confirm a
 fix actually works.
 
+## KNOWN GAP — robots.txt compliance not yet implemented (June 24, 2026)
+
+Confirmed real gap found while investigating `spp.net.au` as a zero-
+listing office: its `robots.txt` explicitly disallows automated
+access, but the production scraper has NO robots.txt checking
+anywhere in the codebase — meaning this site (and possibly others)
+has likely been scraped in production despite its explicit opt-out.
+Deliberately deferred fixing this immediately (noted here instead) to
+keep working through other zero-listing offices, but this is a real,
+not-yet-addressed compliance gap, not a stylistic preference — worth
+prioritizing properly in a dedicated session: check `{domain}/robots.txt`
+before scraping any office, respect `Disallow` rules for the paths
+being accessed, and likely add a `robots_disallowed` office status so
+affected offices are visibly excluded rather than silently skipped.
+
+## Three genuine non-fixes, and a real Rex Websites generalization gap (June 25, 2026)
+
+Investigated several zero-listing offices: `michaelbacon.com.au`
+(personal agent marketing site, Framer-built, zero listings of any
+kind), `www.briqproperty.com.au` and `www.twobirdsproperty.com.au`
+(both genuine property-MANAGEMENT-only companies — explicitly state
+they don't sell, only manage rentals, and refer sellers elsewhere).
+All three are the honest, correct "nothing to fix" outcome, not missed
+extraction tiers — worth documenting explicitly so a future pass
+doesn't re-investigate them.
+
+**A real generalization gap was found and fixed**: `abraagencies.com.au`
+is a SECOND confirmed real "Rex Websites" platform office (same
+"Powered by Rex Websites" footer credit as Kangaroo Point Real Estate)
+with real listings right on its homepage — but used a completely
+different listing-ID format (`QTW27006`, `L18768190`) than the
+original confirmed case (`R2-5091526`). Rex Websites apparently
+supports multiple ID schemes across different customer accounts.
+Broadened the URL exception to handle both the original two-segment
+format and these new single-segment letter-prefixed formats, without
+losing the original confirmed case — confirmed via testing both
+formats together, plus the real nav links that must still be rejected.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style

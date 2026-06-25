@@ -278,6 +278,43 @@ def test_rex_websites_index_path_in_candidate_list():
     print("PASS: Rex Websites sold-listings index path is present in the candidate list")
 
 
+def test_rex_websites_url_pattern_handles_multiple_real_id_formats():
+    """
+    Confirmed real generalization gap (Abra Agencies, June 25, 2026):
+    the original Rex Websites URL exception (built from Kangaroo Point
+    Real Estate) only matched the "R2-{numeric}" ID format. A SECOND
+    real office on the same confirmed platform ("Powered by Rex
+    Websites" footer credit) uses entirely different, letter-prefixed
+    ID formats ("QTW27006", "L18768190") — Rex Websites apparently
+    supports multiple ID schemes across different customer accounts.
+    Broadened the pattern to handle both the original two-segment
+    format and these new single-segment formats, without losing the
+    original confirmed case.
+    """
+    adapter = GenericFallbackAdapter()
+
+    real_urls = [
+        ("https://abraagencies.com.au", "https://abraagencies.com.au/listings/residential_sale-QTW27006-harristown"),
+        ("https://abraagencies.com.au", "https://abraagencies.com.au/listings/residential_sale-L18768190-rangeville"),
+        ("https://abraagencies.com.au", "https://abraagencies.com.au/listings/land_sale-L18768007-glenvale"),
+        ("https://abraagencies.com.au", "https://abraagencies.com.au/listings/commercial_rental-QTW26847-drayton"),
+        ("https://kangaroopointrealestate.com.au", "https://kangaroopointrealestate.com.au/listings/residential_sale-R2-5091526-kangaroo-point"),
+    ]
+    for domain, url in real_urls:
+        assert adapter._looks_like_listing_url(url, domain), f"FAIL: should accept {url}"
+
+    # Real nav links on the same confirmed platform must still be rejected
+    nav_urls = [
+        ("https://abraagencies.com.au", "https://abraagencies.com.au/listings?saleOrRental=Sale&status=available_under_contract"),
+        ("https://abraagencies.com.au", "https://abraagencies.com.au/listings"),
+    ]
+    for domain, url in nav_urls:
+        assert not adapter._looks_like_listing_url(url, domain), f"FAIL: should reject {url}"
+
+    print("PASS: Rex Websites URL pattern correctly handles multiple real confirmed ID formats "
+          "across different customer accounts, still rejects real nav links")
+
+
 def test_rex_websites_url_pattern():
     """
     Confirmed real exception (Kangaroo Point Real Estate, platform:
@@ -582,6 +619,7 @@ if __name__ == "__main__":
     test_melita_bell_index_paths_in_candidate_list()
     test_rex_websites_index_path_in_candidate_list()
     test_rex_websites_url_pattern()
+    test_rex_websites_url_pattern_handles_multiple_real_id_formats()
     test_wordpress_epl_url_pattern_narrowly_scoped()
     test_eagle_software_property_id_url_pattern()
     test_protocol_relative_urls_resolved_without_doubling()
