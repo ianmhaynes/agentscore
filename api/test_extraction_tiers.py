@@ -487,6 +487,101 @@ def test_tier3h_wordpress_epl_no_longer_collides_with_rex_websites():
           "requires its own real price-after-address signature, own real case still works")
 
 
+def test_tier3i_rex_websites_no_longer_collides_with_wordpress_epl():
+    """
+    Regression test for a FOURTH real collision found while fixing the
+    Kangaroo Point Real Estate false positive (June 24, 2026): after
+    moving try_rex_websites_pattern EARLIER in the pipeline (to fix a
+    DIFFERENT real collision with tier 3d), it then collided with the
+    WordPress EPL tier (3h) instead — Rex Websites originally claimed
+    a match on ANY <h1>, even with no real price found BEFORE it,
+    which is exactly what the WordPress EPL fixture looks like (its
+    price comes AFTER the h1, leaving nothing in Rex Websites'
+    "before" window). Fixed using the same proven pattern applied
+    three times already today: require the tier's own real
+    distinguishing signature (a price found BEFORE the h1) before
+    claiming victory.
+    """
+    epl_style_html = """
+    <html><body>
+    <h1>47 Shore Street   Russell Island QLD 4184</h1>
+    <div>3 Bed</div>
+    $475,000
+    </body></html>
+    """
+    result = et.try_rex_websites_pattern(epl_style_html)
+    assert result is None, (
+        f"FAIL: Rex Websites tier should step aside when there's no real price before the h1, "
+        f"but it matched: {result}"
+    )
+
+    # Confirm Rex Websites' own real case still works
+    rex_html = """
+    <html><body>
+    SOLD
+    $1,010,000
+    <h1>8 / 50 Rotherham Street, Kangaroo Point QLD 4169</h1>
+    </body></html>
+    """
+    own_result = et.try_rex_websites_pattern(rex_html)
+    assert own_result is not None
+    assert own_result["price"] == "1010000"
+
+    # Confirm the full pipeline correctly routes the EPL page to tier 3h, not 3i
+    full_result = et.extract_listing_fields(
+        epl_style_html,
+        "https://woolloongabbarealestate.com.au/properties-for-sale/47-shore-street-russell-island-qld-4184/",
+    )
+    assert full_result["tier"] == "wordpress_epl_pattern", (
+        f"FAIL: full pipeline should route to tier 3h, got {full_result['tier']!r}"
+    )
+    print("PASS: Rex Websites no longer collides with WordPress EPL — "
+          "requires its own real price-before-address signature, own real case still works")
+
+
+def test_tier3d_reapit_agentbox_unchanged_by_kangaroo_point_investigation():
+    """
+    Confirms tier 3d's own matching logic was deliberately left
+    UNCHANGED after investigating the Kangaroo Point Real Estate false
+    positive — two different attempts to make this tier itself reject
+    that false positive were both reverted, since each one broke a
+    real, already-tested, legitimate case (a genuine active listing
+    with no status text; a genuine "Contact agent" listing with no
+    parseable price). The real fix lives in pipeline ORDERING instead
+    (try_rex_websites_pattern now runs before this tier). This test
+    exists to make that decision durable — if tier 3d's matching logic
+    is changed again in the future, the two real cases below must
+    still both work.
+    """
+    real_active_no_status_html = """
+    <html><body>
+    <h4>5 Test Street, NEWTOWN</h4>
+    <div>$ 800,000</div>
+    </body></html>
+    """
+    result1 = et.try_reapit_agentbox_pattern(real_active_no_status_html)
+    assert result1 is not None, "A genuine active listing with no status text must still match"
+    assert result1["status"] == ""
+
+    real_contact_agent_html = """
+    <html><body>
+    <span>Property ID: 1P2789</span>
+    <h4>40 Forbes Street Newtown NSW</h4>
+    <div>Contact agent</div>
+    <div>
+    <span>Type</span><span>Land</span>
+    <span>Contract</span><span>For Sale</span>
+    </div>
+    </body></html>
+    """
+    result2 = et.try_reapit_agentbox_pattern(real_contact_agent_html)
+    assert result2 is not None, "A genuine Contact-agent listing with no parseable price must still match"
+    assert result2["price"] == ""
+    assert result2["status"] == "Active"
+    print("PASS: tier 3d's matching logic remains unchanged and correct for both real edge cases "
+          "(no status text; no parseable price) that motivated NOT fixing the false positive here")
+
+
 def test_tier3g_eagle_software_pattern():
     """
     Confirmed real pattern (Living Estate Agents, platform: Eagle
@@ -611,6 +706,8 @@ if __name__ == "__main__":
     test_tier3g_eagle_software_no_longer_collides_with_other_h1_based_tiers()
     test_tier3i_rex_websites_pattern()
     test_tier3h_wordpress_epl_no_longer_collides_with_rex_websites()
+    test_tier3i_rex_websites_no_longer_collides_with_wordpress_epl()
+    test_tier3d_reapit_agentbox_unchanged_by_kangaroo_point_investigation()
     test_tier3d_contract_field_with_whitespace_between_tags()
     test_tier3c_generic_scan()
     test_priority_order_json_ld_beats_everything()

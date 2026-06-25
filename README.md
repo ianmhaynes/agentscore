@@ -667,6 +667,46 @@ a genuine reminder that "the tier exists" and "the tier ever gets a
 chance to run on real data" are two separate things worth verifying
 independently, not assumed together.
 
+**A fourth real collision, and two reverted fix attempts** (June 24,
+2026): getting Kangaroo Point Real Estate genuinely working end-to-end
+required untangling FOUR distinct real bugs, not the three originally
+documented above:
+
+1. CloudhiRexAdapter false-positive (documented above)
+2. Missing candidate index path (documented above)
+3. Tier 3d (Reapit/Agentbox) wrongly matching an unrelated `<h4>` site
+   title, since it only required SOME price within 500 chars, not a
+   price genuinely tied to that heading
+4. Tier 3i (Rex Websites) itself then collided with tier 3h (WordPress
+   EPL) once moved earlier in the pipeline to fix #3, since it also
+   only required ANY `<h1>`, not a real price genuinely found before it
+
+**Two attempted fixes to tier 3d directly were tried and reverted**,
+each breaking a real, already-tested, legitimate case: requiring a
+price unconditionally broke a genuine "Contact agent" listing with no
+parseable price at all; additionally requiring a Contract/Sold status
+signal broke a genuine active listing with no status text shown at
+all. Both real cases are NOT distinguishable from the Kangaroo Point
+false positive using only tier 3d's own signals — confirmed by trying
+twice. The actual, durable fix was **pipeline ordering**: tier 3i (Rex
+Websites) now runs before tier 3d, since 3i's own signature (price
+found before an `<h1>`) is specific enough to correctly claim Rex
+Websites pages first, without needing tier 3d to change at all. Tier
+3i itself then needed the same "require a real price, not just any
+heading" fix already applied to Eagle Software and WordPress EPL
+earlier today — the fourth occurrence of this exact bug shape in one
+session.
+
+**The real, durable lesson**: when multiple tiers share a structural
+shape (a heading tag + a nearby price), each one's price-search window
+can spuriously satisfy a DIFFERENT tier's loose requirements purely by
+document position — not because the price is actually associated with
+that tier's heading. The fix is always the same: require each tier's
+own genuinely distinguishing signature (not just "a price exists
+somewhere nearby") before claiming a match, OR resolve via pipeline
+ordering when two tiers' real signatures genuinely can't be told apart
+from each other's confirmed real edge cases.
+
 ## Decision: staying plain-HTTP only (no Playwright/browser rendering)
 
 JS-loaded sites (LJ Hooker's search-results index, the Broadbeach-style

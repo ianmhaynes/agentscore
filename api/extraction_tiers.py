@@ -497,13 +497,25 @@ def try_rex_websites_pattern(html, log=None):
     if not address or len(address) < 8:
         return None
 
-    # Status/price appear BEFORE the h1 on this platform, confirmed
-    # real ordering — check a window of text immediately preceding it.
+    # CONFIRMED REAL BUG (June 24, 2026): this tier originally claimed
+    # a match on ANY <h1>, even with no real price found BEFORE it —
+    # which caused it to collide with the WordPress EPL tier (3h),
+    # since that platform's price comes AFTER the h1, leaving nothing
+    # in the "before" window for THIS tier to find, yet it was still
+    # claiming the match with an empty price and a default "Active"
+    # status. Fixed by requiring a genuine price to actually be found
+    # before the h1 — this tier's own real distinguishing signature,
+    # confirmed always present in the real Kangaroo Point Real Estate
+    # structure this tier was built from. The same proven fix pattern
+    # applied to Eagle Software and WordPress EPL earlier today, now
+    # needed a fourth time.
     before_address = html[max(0, addr_match.start() - 500):addr_match.start()]
-    status = "Sold" if re.search(r"(?:^|[>\s])SOLD(?:[<\s]|$)", before_address, re.IGNORECASE) else "Active"
-
     price_match = re.search(r"\$\s*[\d,]+(?!\s*per)", before_address)
-    price = _parse_price(price_match.group(0)) if price_match else ""
+    if not price_match:
+        return None
+    price = _parse_price(price_match.group(0))
+
+    status = "Sold" if re.search(r"(?:^|[>\s])SOLD(?:[<\s]|$)", before_address, re.IGNORECASE) else "Active"
 
     suburb = ""
     suburb_match = re.search(r",\s*([A-Za-z\s]+?)\s+[A-Z]{2,3}\s+\d{4}\s*$", address)
@@ -642,7 +654,23 @@ def try_reapit_agentbox_pattern(html, log=None):
     if not address or len(address) < 5:
         return None
 
-    # Price: the first $ amount appearing shortly after the h4 close tag
+    # NOTE (June 24, 2026): a real false positive was found where an
+    # unrelated <h4> site title on a Rex Websites page (Kangaroo Point
+    # Real Estate) matched this tier purely because SOME price existed
+    # within 500 chars of it. Two different attempts to fix THIS tier
+    # directly (requiring a price unconditionally; requiring a price
+    # AND a status signal) were both reverted after confirming each
+    # one broke a real, already-tested, legitimate case this tier
+    # needs to keep handling — a genuine active listing with no
+    # parseable price at all ("Contact agent"), and a genuine active
+    # listing with no status text shown at all. The false positive and
+    # these legitimate cases are NOT reliably distinguishable using
+    # only this tier's own signals. The real fix lives in pipeline
+    # ORDERING instead (see extract_listing_fields) — try_rex_
+    # websites_pattern now runs BEFORE this tier, since its own
+    # signature is specific enough to correctly claim Rex Websites
+    # pages first. This tier's own matching logic is intentionally
+    # left exactly as originally built.
     after_address = html[addr_match.end():addr_match.end() + 500]
     price_match = re.search(r"\$\s*([\d,]+)", after_address)
     price = ""
@@ -691,11 +719,32 @@ def try_reapit_agentbox_pattern(html, log=None):
         # slicing — a real bug found via testing: the original code
         # sliced html using an after_address-relative offset directly,
         # which pointed at the wrong region of the page entirely.
+        # Guarded for price_match being None (e.g. a real "Contact
+        # agent" listing with no parseable price at all) — without a
+        # price match there's no reference position to anchor this
+        # check against, so it's simply skipped, leaving status as "".
         if price_match:
             absolute_price_pos = addr_match.end() + price_match.start()
             before_price = html[max(0, absolute_price_pos - 200):absolute_price_pos]
             if re.search(r">\s*Sold\s*<", before_price, re.IGNORECASE):
                 status = "Sold"
+    # NOTE (June 24, 2026): an earlier version of this fix also
+    # REQUIRED a status signal (Contract field or standalone Sold
+    # text) to be found, attempting to resolve a real false positive
+    # (an unrelated <h4> on a different platform's page, Kangaroo
+    # Point Real Estate, matching purely because SOME price existed
+    # within 500 chars of it). That additional requirement was
+    # reverted because it ALSO broke a real, already-tested, valid
+    # case: a genuine ACTIVE listing with no status text shown at all
+    # (confirmed real, deliberately returns status="" rather than
+    # guessing — see test_tier3d_agentpoint_standalone_sold_status).
+    # The false positive and this genuine case are NOT distinguishable
+    # using only tier 3d's own signals in isolation — both have a
+    # price, neither has a Contract field or Sold text. The real fix
+    # for the false positive belongs in tier ORDERING/routing (ensure
+    # a more specific tier for that platform runs first), not in
+    # making this tier reject valid data it cannot actually tell apart
+    # from the bad case.
 
     if log:
         log("    [tier 3d: Reapit/Agentbox pattern - h4 address + Contract field] matched")
@@ -805,12 +854,26 @@ def extract_listing_fields(html, listing_url, log=None, llm_api_key=None):
         try_meta_tags,
         try_known_shared_template,
         try_class_price_address,
+        # try_rex_websites_pattern runs BEFORE try_reapit_agentbox_pattern
+        # deliberately (June 24, 2026): a real false positive was found
+        # where an unrelated <h4> site title on a Rex Websites page
+        # (Kangaroo Point Real Estate) matched tier 3d purely because
+        # SOME price existed within 500 chars of it. tier 3i's own
+        # signature (status/price appearing BEFORE an <h1>, not near
+        # any <h4> at all) is specific enough that it correctly claims
+        # Rex Websites pages first, before tier 3d ever gets a chance
+        # to wrongly match the unrelated heading. Tier 3d itself was
+        # deliberately NOT made stricter to reject this case directly,
+        # since doing so also broke a real, valid case it cannot
+        # actually distinguish from the false positive using its own
+        # signals alone (a genuine active listing with no status text
+        # at all) — see try_reapit_agentbox_pattern's own comments.
+        try_rex_websites_pattern,
         try_reapit_agentbox_pattern,
         try_semibold_muted_pattern,
         try_renet_hidden_input_pattern,
         try_eagle_software_pattern,
         try_wordpress_epl_pattern,
-        try_rex_websites_pattern,
         try_generic_dollar_scan,
     ):
         result = tier_fn(html, log=log)
