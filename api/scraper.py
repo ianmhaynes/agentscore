@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, asdict
 from urllib.parse import urlparse
 import requests
 import extraction_tiers
+import browserless_fallback
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -239,7 +240,31 @@ class CloudhiRexAdapter:
 
     def detect(self, html):
         lowered = html.lower()
-        return "cloudhi.io" in lowered or "rexsoftware" in lowered
+        # CONFIRMED REAL BUG (June 24, 2026): "rexsoftware" alone is too
+        # broad — Rex Software (the parent company) makes at least TWO
+        # distinct, structurally different products: Cloudhi (this
+        # adapter's actual target) and "Rex Websites" (a different,
+        # also-server-rendered product, confirmed real on Kangaroo
+        # Point Real Estate, whose footer links to
+        # rexsoftware.com/products/real-estate-websites — the SAME
+        # parent-company domain, but a COMPLETELY DIFFERENT page
+        # structure, handled by its own dedicated tier in
+        # extraction_tiers.py, not this adapter at all). Matching on
+        # the company name alone wrongly claimed Rex Websites sites for
+        # this adapter, which then correctly found nothing (wrong
+        # URL/page assumptions for that different product) and
+        # returned zero listings — exactly the kind of silent,
+        # confidently-wrong routing this project has hit more than once
+        # with similarly-named but structurally distinct platforms
+        # (e.g. yesterday's LJ Hooker HubSpot-vs-legacy distinction).
+        # Require "cloudhi.io" specifically, OR the more specific
+        # "rexsoftware.com/products/crm" (Cloudhi's actual product
+        # page, distinct from "/products/real-estate-websites").
+        if "cloudhi.io" in lowered:
+            return True
+        if "rexsoftware" in lowered and "real-estate-websites" not in lowered:
+            return True
+        return False
 
     def _parse_price(self, price_text):
         if not price_text:
@@ -472,6 +497,14 @@ class LJHookerAdapter:
 
     name = "lj_hooker"
 
+    def __init__(self, browserless_api_key=None):
+        # Same opt-in pattern as GenericFallbackAdapter — only used when
+        # both the own-subdomain and officeId-based discovery paths
+        # (both confirmed real, both genuinely fail for this platform
+        # generation, see class docstring) find nothing at all.
+        self.browserless_api_key = browserless_api_key
+        self.browserless_call_count = 0
+
     def detect(self, html):
         # IMPORTANT: detect() runs against the HOMEPAGE, which is a
         # separate, HubSpot-powered marketing shell — confirmed via live
@@ -515,12 +548,38 @@ class LJHookerAdapter:
         return urls
 
     def _parse_detail_page(self, html, listing_url, domain, log):
+        # CONFIRMED REAL BUGS (June 24, 2026), found via raw HTML from
+        # Browserless against a real, currently-live listing
+        # (90 Mortensen Road, Nerang QLD):
+        #   1. The real <p itemprop="identifier"> can be PLAIN "SOLD"
+        #      with no price attached at all — confirmed real case
+        #      where LJ Hooker doesn't publish a final sold price. The
+        #      original regex required a $ amount in the same match,
+        #      which made this fail and fall through to a much looser
+        #      fallback regex that, combined with bug 2, matched the
+        #      wrong content entirely.
+        #   2. The page's NAV BAR has its own itemprop="name" element —
+        #      <a href=".../buy" itemprop="url"><span itemprop="name">
+        #      Buy</span></a> — which the address fallback regex
+        #      (itemprop="name"[^>]*>([^<]+)<) matched FIRST, since it
+        #      appears earlier in the document than the real address
+        #      heading (<h2 class="property-overview__address"
+        #      itemprop="name">90 Mortensen Road, Nerang</h2>). This is
+        #      why "Buy" was being extracted as the address for every
+        #      single listing on this page generation.
+        # Fixed by: checking the specific property-overview__status/
+        # __address classes FIRST (unambiguous, can't collide with nav
+        # elements), with the original itemprop-only patterns kept only
+        # as a fallback for pages where the specific classes might
+        # differ.
         status_price_match = re.search(
-            r'itemprop="identifier"[^>]*>([^<]+)<', html
+            r'class="[^"]*property-overview__status[^"]*"[^>]*>([^<]+)<', html
         )
         if not status_price_match:
-            # Fallback: the confirmed visible text pattern even if the
-            # exact itemprop attribute ordering differs from what's expected
+            status_price_match = re.search(
+                r'itemprop="identifier"[^>]*>([^<]+)<', html
+            )
+        if not status_price_match:
             status_price_match = re.search(
                 r'>((?:Sold|For Sale)\s+For\s+\$[\d,]+|(?:Sold|For Sale)[^<]{0,40}\$[\d,]+)<',
                 html,
@@ -531,12 +590,11 @@ class LJHookerAdapter:
 
         status, price = self._parse_price_and_status(status_price_match.group(1))
 
-        addr_match = re.search(r'itemprop="name"[^>]*>([^<]+)<', html)
+        addr_match = re.search(
+            r'class="[^"]*property-overview__address[^"]*"[^>]*>([^<]+)<', html
+        )
         if not addr_match:
-            addr_match = re.search(
-                r'<h2[^>]*class="[^"]*property-overview__address[^"]*"[^>]*>([^<]+)</h2>',
-                html,
-            )
+            addr_match = re.search(r'itemprop="name"[^>]*>([^<]+)<', html)
         address = addr_match.group(1).strip() if addr_match else ""
         if not address:
             log(f"    No address found on {listing_url}, skipping")
@@ -568,7 +626,17 @@ class LJHookerAdapter:
             # second-to-last comma-separated piece if it looks state-free
             suburb_candidate = parts[-1]
             suburb_match = re.match(r"([A-Za-z\s]+?)\s+[A-Z]{2,3}$", suburb_candidate)
-            suburb = suburb_match.group(1).strip() if suburb_match else ""
+            if suburb_match:
+                suburb = suburb_match.group(1).strip()
+            else:
+                # CONFIRMED REAL CASE (June 24, 2026, found via raw HTML):
+                # some addresses on this platform have NO state suffix
+                # at all in the last comma-separated segment — just the
+                # bare suburb name (e.g. "90 Mortensen Road, Nerang",
+                # not "..., Nerang QLD"). If the segment is short and
+                # alphabetic, it's very likely already just the suburb.
+                if re.match(r"^[A-Za-z\s]+$", suburb_candidate) and len(suburb_candidate) < 30:
+                    suburb = suburb_candidate
 
         listing_id_match = re.search(r"-([a-z0-9]{6,8})$", listing_url)
         listing_id = listing_id_match.group(1) if listing_id_match else listing_url
@@ -663,21 +731,60 @@ class LJHookerAdapter:
                     "JS-loaded platform with no server-rendered listing data)")
 
         if not listing_urls:
-            log("  No listing URLs found via any known search-results pattern")
-            return []
+            if not self.browserless_api_key:
+                log("  No listing URLs found via any known search-results pattern")
+                return []
+
+            # LAST RESORT (June 24, 2026): both known discovery paths
+            # are confirmed genuinely empty for this platform generation
+            # (HubSpot homepage shell, JS-loaded search-results page —
+            # see class docstring for full confirmation history). Try
+            # the homepage's JS-RENDERED version via Browserless.
+            log("  Both known discovery patterns found nothing via plain HTTP — "
+                "trying Browserless (JS-rendered) as a last resort...")
+            rendered_html = browserless_fallback.fetch_rendered_html(
+                domain, self.browserless_api_key, log=log,
+            )
+            if not rendered_html:
+                log("  Browserless fallback also found nothing usable — giving up on this office")
+                return []
+
+            self.browserless_call_count += 1
+            found = self._collect_listing_urls(rendered_html, domain)
+            if not found:
+                log("  Browserless returned rendered HTML, but no candidate listing URLs "
+                    "were found in it either")
+                return []
+            log(f"  Browserless (JS-rendered homepage): found {len(found)} listing URL(s)")
+            listing_urls.update(found)
+            needed_browserless = True
+        else:
+            needed_browserless = False
 
         log(f"  Visiting {len(listing_urls)} listing page(s)"
             f"{' (via officeId fallback)' if used_fallback else ''}...")
         listings = []
         for listing_url in listing_urls:
-            try:
-                resp = session.get(listing_url, timeout=REQUEST_TIMEOUT)
-            except requests.RequestException as e:
-                log(f"    ERROR fetching {listing_url}: {e}")
+            html = None
+            if needed_browserless:
+                html = browserless_fallback.fetch_rendered_html(
+                    listing_url, self.browserless_api_key, log=log,
+                )
+                if html:
+                    self.browserless_call_count += 1
+            else:
+                try:
+                    resp = session.get(listing_url, timeout=REQUEST_TIMEOUT)
+                except requests.RequestException as e:
+                    log(f"    ERROR fetching {listing_url}: {e}")
+                    continue
+                if resp.status_code != 200:
+                    continue
+                html = resp.text
+
+            if not html:
                 continue
-            if resp.status_code != 200:
-                continue
-            parsed = self._parse_detail_page(resp.text, listing_url, domain, log)
+            parsed = self._parse_detail_page(html, listing_url, domain, log)
             if parsed:
                 listings.append(parsed)
             time.sleep(0.3)
@@ -739,9 +846,23 @@ class GenericFallbackAdapter:
         "/recently-sold", "/sold", "/show-all-properties",
         "/selling/recent-sales", "/buying/properties-for-sale",
         "/buying/recently-sold",
+        # Confirmed real path (Kangaroo Point Real Estate, platform:
+        # Rex Websites — June 24, 2026): a real sold-listings index
+        # page found 494 genuine sold listings at this exact URL.
+        "/listings/?saleOrRental=Sale&sold=1",
+        # Confirmed real paths (The Melita Bell Team, RE/MAX Success
+        # franchise — June 24, 2026): a real sold-listings index page
+        # with 471 pages of genuine results was found at this exact
+        # path, on a different WordPress real estate plugin/theme than
+        # the EPL plugin confirmed earlier today.
+        "/sold-residential", "/current-residential-for-sale",
+        # Confirmed real paths (Elders Smith and Elliott Townsville
+        # franchise office — June 25, 2026): real listings found
+        # directly on the homepage and via these index paths.
+        "/residential/sale", "/residential/sold", "/residential/rent",
     ]
 
-    def __init__(self, llm_api_key=None):
+    def __init__(self, llm_api_key=None, browserless_api_key=None):
         # Optional — if not supplied, the LLM tier is simply skipped
         # (extraction_tiers.extract_listing_fields handles this
         # gracefully). Passed in per-instance rather than read from an
@@ -749,6 +870,14 @@ class GenericFallbackAdapter:
         # (key entered in the UI, sent per-request, never stored) holds.
         self.llm_api_key = llm_api_key
         self.llm_call_count = 0  # for real cost measurement, see README
+        # Same opt-in pattern: Browserless's JS-rendering fallback is
+        # only used when a key is supplied AND every plain-HTTP path
+        # has already failed to find any candidate listing URLs at
+        # all. Confirmed real, small minority of sites need this
+        # (~2% across ~90 sites tested) — see browserless_fallback.py
+        # module docstring for the full cost reasoning.
+        self.browserless_api_key = browserless_api_key
+        self.browserless_call_count = 0
 
     def detect(self, html):
         # Deliberately always matches — this is the catch-all, tried only
@@ -757,9 +886,35 @@ class GenericFallbackAdapter:
         return True
 
     def _looks_like_listing_url(self, url, domain):
-        if not url.startswith(domain):
+        # CONFIRMED REAL BUG (June 23, 2026): a strict url.startswith(
+        # domain) check rejected every one of Travers Gray's listing
+        # links, because its protocol-relative hrefs
+        # (e.g. "//www.traversgray.com.au/21534560") always resolve to
+        # the www. variant, while `domain` is often the bare,
+        # non-www. version the user originally typed in (before any
+        # www.-retry logic runs). www. and non-www. are the same real
+        # site; normalize both sides before comparing so this doesn't
+        # silently reject every listing on a site that mixes the two.
+        normalized_url = re.sub(r"^https?://(www\.)?", "", url)
+        normalized_domain = re.sub(r"^https?://(www\.)?", "", domain)
+        if not normalized_url.startswith(normalized_domain):
             return False
-        path = url[len(domain):]
+        path = normalized_url[len(normalized_domain):]
+
+        # CONFIRMED REAL FALSE POSITIVE (Stone Real Estate, June 23,
+        # 2026): a WordPress plugin called "ZooRealty" generates
+        # calendar-reminder (.ics) links for open-home/auction times,
+        # shaped like
+        # "/wp-content/plugins/zoorealty/display/elements/crm.php
+        # ?property_id=8733796&time=16:15:00" — these end in a numeric
+        # ID and were wrongly accepted as listing pages, but are
+        # actually iCalendar files (confirmed via direct fetch), not
+        # property pages at all. Excluded by checking for
+        # "wp-content/plugins" anywhere in the path, since no real
+        # listing page should ever live inside a plugin's own asset
+        # directory regardless of platform.
+        if "wp-content/plugins" in path.lower():
+            return False
 
         # Confirmed via live inspection of 5+ real sites in one session
         # (June 2026): a genuine listing URL consistently ends in a
@@ -784,15 +939,113 @@ class GenericFallbackAdapter:
         # "/about", "/sold" never end in 4+ digits), so the extra length
         # guard was redundant protection that became actively harmful
         # once a real site with short listing URLs was found.
+        #
+        # Confirmed exception (Living Estate Agents, platform: Eagle
+        # Software, confirmed via "Powered by Eagle Software" footer —
+        # June 2026): listing URLs use a query-string ID, NOT a
+        # trailing numeric ID — e.g.
+        # "/property?property_id=1662525/2-chisholm-avenue-clemton-park".
+        # The numeric ID sits right after "property_id=", not at the
+        # end of the path (a slug follows it). Checked as an explicit,
+        # separate pattern rather than trying to generalize the
+        # trailing-numeric-ID rule further.
+        if re.search(r"property_id=\d{4,}", path):
+            return True
+        # Confirmed exception (Stone Real Estate, platform: Reapit
+        # Websites via a WordPress "ZooRealty" plugin wrapper — June 23,
+        # 2026): listing URLs put the numeric ID FIRST in the slug, not
+        # last — e.g. "/property/6561371-10-trade-street-newtown-nsw/".
+        # The general trailing-numeric-ID rule below would never match
+        # this shape; checked as its own explicit pattern instead of
+        # trying to generalize further.
+        if re.search(r"/\d{4,}-[a-zA-Z0-9]", path):
+            return True
+        # Confirmed exception (Woolloongabba Real Estate, WordPress
+        # "EPL" real estate plugin — confirmed via
+        # "?action=epl_search&post_type=property" query params on the
+        # site's own nav links — June 24, 2026): real listing URLs are
+        # "/properties-for-sale/{full-address-slug-ending-in-postcode}/"
+        # — e.g.
+        # "/properties-for-sale/506-19-hope-street-south-brisbane-qld-4101/".
+        # The trailing 4-digit number here is a POSTCODE, not a real
+        # listing ID — the general trailing-numeric-ID rule below would
+        # ALSO match this (correctly, by coincidence), but it would
+        # JUST AS EASILY match other postcode-ending nav links that
+        # aren't listings at all, since "ends in 4 digits" is an
+        # extremely common, generic pattern for any Australian
+        # address-shaped URL. This exception is intentionally NARROW —
+        # it requires the known "/properties-for-sale/" prefix AND a
+        # genuine slug (not a query string) between it and the trailing
+        # slash, specifically excluding the real nav link
+        # "/properties-for-sale/?action=epl_search..." (which has a
+        # "?" immediately after the prefix, no real slug at all).
+        if re.match(r"^/properties-for-sale/[^?]+/$", path):
+            return True
+        # Confirmed exception (Rex Websites platform — confirmed via
+        # "Powered by Rex Websites" footer credit on multiple real
+        # offices, June 24-25, 2026): listing URLs are
+        # "/listings/{type}_{saleOrRental}-{id}-{suburb-slug}". The
+        # original fix (Kangaroo Point Real Estate) only confirmed the
+        # "R2-{numeric}" ID format; a second real office (Abra
+        # Agencies) confirmed the SAME platform also uses letter-
+        # prefixed ID formats like "QTW27006" and "L18768190" — Rex
+        # Websites apparently supports multiple ID schemes across
+        # different customer accounts. Broadened to accept any
+        # alphanumeric ID (letters and/or digits) in this position,
+        # not just the original numeric-after-"R2-" pattern. Distinct
+        # from BresicWhitney's Rex CRM (a JS-gated dead end, confirmed
+        # in an earlier session) — "Rex Websites" is a different
+        # product from the same company, and is fully server-rendered.
+        if re.search(r"/listings/[a-z_]+-(?:[A-Za-z]+\d*-)?[A-Za-z0-9]{4,}-[a-z]", path, re.IGNORECASE):
+            return True
+        # Confirmed exception (Century 21 Aaron Moon Realty / Townsville,
+        # platform built by "Push Creative" — confirmed via real footer
+        # credit, June 25, 2026): listing URLs are
+        # "/{numeric-id}/{address-slug}" — the ID as its OWN complete
+        # path segment, not hyphenated into the slug at all (distinct
+        # from every other confirmed pattern in this module so far).
+        if re.match(r"^/\d{4,}/[a-z0-9-]+/?$", path, re.IGNORECASE):
+            return True
+        # Confirmed exception (Elders Smith and Elliott Townsville
+        # franchise office — June 25, 2026): listing URLs end in a
+        # LETTER-PREFIXED trailing ID — e.g.
+        # "/residential/sale/153-stanton-terrace-townsville-city-qld-
+        # 4810-300P197394/" — the trailing "300P197394" mixes a letter
+        # with digits, so the general purely-numeric trailing-ID rule
+        # below doesn't match it. Scoped specifically to the confirmed
+        # "/residential/{sale|rent|sold}/" path prefix to avoid
+        # accidentally matching unrelated letter+digit suffixes
+        # elsewhere on a page.
+        if re.search(r"/residential/(?:sale|rent|sold)/[a-z0-9-]+-\d*[A-Za-z]\d{4,}/?$", path, re.IGNORECASE):
+            return True
         return bool(re.search(r"[-/]\d{4,}/?$", path))
 
     def _collect_listing_urls(self, html, domain):
         urls = set()
+        # CONFIRMED REAL BUG (June 23, 2026): Travers Gray Real Estate's
+        # actual hrefs are PROTOCOL-RELATIVE URLs — e.g.
+        # href="//www.traversgray.com.au/21534560" (no "https:" prefix,
+        # just "//"). Neither the absolute-URL branch (requires
+        # https?://) nor the original root-relative branch handled this
+        # correctly — the root-relative regex matched the LEADING "/"
+        # of "//www.traversgray..." as if it were a domain-relative path
+        # starting with "/www.traversgray...", then prepended our own
+        # domain again, producing a doubled URL like
+        # "https://traversgray.com.au//traversgray.com.au/21534560" —
+        # which silently 404'd every single time, hidden by the
+        # absence of status-code logging (also fixed this session).
+        # This MUST be checked first, before the root-relative branch,
+        # since "//host/path" also matches a naive "starts with /" test.
+        scheme = domain.split("://")[0]  # "https" or "http"
+        for m in re.finditer(r'href="(//[^"\s]+)"', html):
+            url = f"{scheme}:{m.group(1)}"
+            if self._looks_like_listing_url(url, domain):
+                urls.add(url)
         for m in re.finditer(r'href="(https?://[^"\s]+)"', html):
             url = m.group(1)
             if self._looks_like_listing_url(url, domain):
                 urls.add(url)
-        for m in re.finditer(r'href="(/[^"\s]+)"', html):
+        for m in re.finditer(r'href="(/(?!/)[^"\s]+)"', html):
             url = domain + m.group(1)
             if self._looks_like_listing_url(url, domain):
                 urls.add(url)
@@ -922,21 +1175,77 @@ class GenericFallbackAdapter:
             time.sleep(0.3)
 
         if not listing_urls:
-            log("  No listing index page matched any known path pattern — "
-                "this site's structure is not covered by the generic fallback")
-            return []
+            if not self.browserless_api_key:
+                log("  No listing index page matched any known path pattern — "
+                    "this site's structure is not covered by the generic fallback")
+                return []
+
+            # LAST RESORT: every plain-HTTP path found nothing. Try the
+            # homepage's JS-RENDERED version via Browserless — confirmed
+            # real use case (LJ Hooker's HubSpot platform, June 2026):
+            # the homepage's REAL listing links only exist after
+            # JavaScript runs, invisible to every plain-HTTP fetch no
+            # matter which path is tried.
+            log("  No listing index page matched any known path pattern via plain HTTP — "
+                "trying Browserless (JS-rendered) as a last resort...")
+            rendered_html = browserless_fallback.fetch_rendered_html(
+                domain, self.browserless_api_key, log=log,
+            )
+            if not rendered_html:
+                log("  Browserless fallback also found nothing usable — giving up on this office")
+                return []
+
+            self.browserless_call_count += 1
+            found = self._collect_listing_urls(rendered_html, domain)
+            if not found:
+                log("  Browserless returned rendered HTML, but no candidate listing URLs "
+                    "were found in it either — this site's structure is genuinely not "
+                    "covered, not just hidden behind JavaScript")
+                return []
+            log(f"  Browserless (JS-rendered homepage): found {len(found)} candidate listing URL(s)")
+            listing_urls.update(found)
+            # A site whose LISTING LINKS only exist after JS runs is a
+            # strong real signal that its listing DATA likely works the
+            # same way — confirmed true for LJ Hooker's HubSpot
+            # platform (checked the dedicated search-results page
+            # directly; still only placeholder text in plain HTML).
+            # Tracked so the detail-page loop below knows to use
+            # Browserless from the start rather than wastefully trying
+            # plain HTTP first and failing every single time.
+            needed_browserless_for_discovery = True
+        else:
+            needed_browserless_for_discovery = False
 
         log(f"  Visiting {len(listing_urls)} candidate listing page(s)...")
         listings = []
         for listing_url in listing_urls:
-            try:
-                resp = session.get(listing_url, timeout=REQUEST_TIMEOUT)
-            except requests.RequestException as e:
-                log(f"    ERROR fetching {listing_url}: {e}")
+            html = None
+            if needed_browserless_for_discovery:
+                html = browserless_fallback.fetch_rendered_html(
+                    listing_url, self.browserless_api_key, log=log,
+                )
+                if html:
+                    self.browserless_call_count += 1
+            else:
+                try:
+                    resp = session.get(listing_url, timeout=REQUEST_TIMEOUT)
+                except requests.RequestException as e:
+                    log(f"    ERROR fetching {listing_url}: {e}")
+                    continue
+                if resp.status_code != 200:
+                    # CONFIRMED REAL BUG (June 23, 2026): this case was
+                    # previously silent — no log line at all — which hid
+                    # the real cause of traversgray.com.au returning 0
+                    # parsed listings for an entire debugging session. Now
+                    # logged explicitly so a non-200 response is visible
+                    # rather than indistinguishable from "parsing failed".
+                    log(f"    {listing_url} returned HTTP {resp.status_code}, skipping")
+                    continue
+                html = resp.text
+
+            if not html:
                 continue
-            if resp.status_code != 200:
-                continue
-            parsed = self._parse_detail_page(resp.text, listing_url, domain, log)
+            parsed = self._parse_detail_page(html, listing_url, domain, log)
             if parsed:
                 listings.append(parsed)
             time.sleep(0.2)
@@ -946,23 +1255,25 @@ class GenericFallbackAdapter:
         return listings
 
 
-def _build_adapters(llm_api_key=None):
+def _build_adapters(llm_api_key=None, browserless_api_key=None):
     """
     Built per-call rather than as a single module-level constant so each
     request can supply its own LLM API key (same pattern as the Google
     Places key in discovery.py — entered in the UI, sent per-request,
     never stored server-side). When no key is supplied, GenericFallback
     Adapter still works exactly as before, just without tier 4 (LLM).
+    Same pattern for browserless_api_key — without it, the JS-rendering
+    fallback in GenericFallbackAdapter.fetch() is simply skipped.
     """
     return [
         RayWhiteDynamicsAdapter(),
         CloudhiRexAdapter(),
-        LJHookerAdapter(),
-        GenericFallbackAdapter(llm_api_key=llm_api_key),
+        LJHookerAdapter(browserless_api_key=browserless_api_key),
+        GenericFallbackAdapter(llm_api_key=llm_api_key, browserless_api_key=browserless_api_key),
     ]
 
 
-def scrape_office(raw_url, log=print, llm_api_key=None):
+def scrape_office(raw_url, log=print, llm_api_key=None, browserless_api_key=None):
     """
     Scrape a single office. Tries each adapter's detect() against the
     homepage HTML; uses the first that matches. Returns (listings, error).
@@ -1003,7 +1314,7 @@ def scrape_office(raw_url, log=print, llm_api_key=None):
     if resp.status_code != 200:
         return [], f"Site returned HTTP {resp.status_code}"
 
-    adapters = _build_adapters(llm_api_key=llm_api_key)
+    adapters = _build_adapters(llm_api_key=llm_api_key, browserless_api_key=browserless_api_key)
     matched_adapter = None
     for adapter in adapters:
         if adapter.detect(resp.text):
@@ -1038,7 +1349,7 @@ def scrape_office(raw_url, log=print, llm_api_key=None):
         try:
             www_resp = session.get(www_domain, timeout=REQUEST_TIMEOUT)
             if www_resp.status_code == 200:
-                www_adapters = _build_adapters(llm_api_key=llm_api_key)
+                www_adapters = _build_adapters(llm_api_key=llm_api_key, browserless_api_key=browserless_api_key)
                 www_matched = None
                 for adapter in www_adapters:
                     if adapter.detect(www_resp.text):
@@ -1055,7 +1366,7 @@ def scrape_office(raw_url, log=print, llm_api_key=None):
     return listings, None
 
 
-def scrape_offices(urls, log=print, llm_api_key=None):
+def scrape_offices(urls, log=print, llm_api_key=None, browserless_api_key=None):
     """Scrape a list of office URLs. Returns dict with results + per-office status."""
     all_listings = []
     office_results = []
@@ -1065,7 +1376,9 @@ def scrape_offices(urls, log=print, llm_api_key=None):
         raw_url = raw_url.strip()
         if not raw_url:
             continue
-        listings, error = scrape_office(raw_url, log=log, llm_api_key=llm_api_key)
+        listings, error = scrape_office(
+            raw_url, log=log, llm_api_key=llm_api_key, browserless_api_key=browserless_api_key,
+        )
         office_results.append({
             "url": raw_url,
             "success": error is None,
