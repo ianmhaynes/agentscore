@@ -607,3 +607,80 @@ def export_rankings_xlsx():
 
 if __name__ == "__main__":
     app.run(debug=True, port=5050)
+
+
+@app.route("/api/agent-scores")
+def agent_scores_api():
+    from flask import jsonify
+    from collections import defaultdict
+    import datetime
+
+    MIN_SALES = 5
+
+    def grade(v):
+        v = abs(v)
+        if v <= 3: return "A"
+        if v <= 7: return "B"
+        if v <= 12: return "C"
+        return "D"
+
+    conn = db.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT agent_name, suburb, guide_price, sold_price
+                FROM listing_snapshots
+                WHERE agent_name IS NOT NULL AND agent_name != ''
+                  AND guide_price ~ '^[0-9]+$'
+                  AND sold_price ~ '^[0-9]+$'
+                  AND guide_price::numeric > 50000
+                  AND sold_price::numeric > 50000
+                  AND (sold_price::numeric / guide_price::numeric) BETWEEN 0.5 AND 2.0
+            """)
+            rows = cur.fetchall()
+            cols = [d[0] for d in cur.description]
+    finally:
+        conn.close()
+
+    agent_map = defaultdict(lambda: {"variances": [], "suburbs": set()})
+    for row in rows:
+        r = dict(zip(cols, row))
+        name = (r.get("agent_name") or "").strip()
+        if not name: continue
+        guide = int(r["guide_price"])
+        sold = int(r["sold_price"])
+        variance = (sold - guide) / guide * 100
+        agent_map[name]["variances"].append(variance)
+        if r.get("suburb"):
+            agent_map[name]["suburbs"].add(r["suburb"])
+
+    scored = []
+    for name, d in agent_map.items():
+        n = len(d["variances"])
+        if n < MIN_SALES: continue
+        avg = sum(d["variances"]) / n
+        scored.append({
+            "name": name,
+            "sales": n,
+            "avg_variance": round(avg, 1),
+            "grade": grade(avg),
+            "suburbs": sorted(d["suburbs"]),
+        })
+
+    scored.sort(key=lambda x: abs(x["avg_variance"]))
+    for i, r in enumerate(scored):
+        r["rank"] = i + 1
+
+    resp = jsonify({
+        "agents": scored,
+        "total": len(scored),
+        "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
+    })
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+@app.route("/scores")
+def scores_page():
+    from flask import render_template
+    return render_template("scores.html")
