@@ -1018,6 +1018,11 @@ class GenericFallbackAdapter:
         # elsewhere on a page.
         if re.search(r"/residential/(?:sale|rent|sold)/[a-z0-9-]+-\d*[A-Za-z]\d{4,}/?$", path, re.IGNORECASE):
             return True
+        # Confirmed real pattern (PropertyList platform -- July 1, 2026):
+        # /property/{id}/{slug} e.g. /property/136/204--32-34-miller-street-bargara-qld
+        # Ends in text slug not digits so the trailing-numeric-ID rule below never matches.
+        if re.search(r"^/property/\d+/[a-z0-9-]+$", path, re.IGNORECASE):
+            return True
         return bool(re.search(r"[-/]\d{4,}/?$", path))
 
     def _collect_listing_urls(self, html, domain):
