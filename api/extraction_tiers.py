@@ -701,6 +701,99 @@ def try_elders_franchise_pattern(html, log=None):
     }
 
 
+def try_propertylist_platform_pattern(html, log=None):
+    """
+    Tier 3l. 'PropertyList' platform pattern.
+    Confirmed on 9 offices (July 1, 2026):
+        scottwade.com.au, repropertyagents.com.au, rowlingandco.com.au,
+        codepg.com.au, bridgebury.com.au, pinpointproperty.com.au,
+        agrealty.com.au, russellislandrealestate.com.au,
+        realestatevision.net.au, redlandscoastrealty.com.au.
+
+    Signature: class="propertyList-location-suburb" present in raw HTML.
+    Listings live on the HOMEPAGE (not a /for-sale sub-path — confirmed:
+    /for-sale returns 0 hits on scottwade and rowlingandco; homepage
+    returns 24 each). Detail URLs follow /property/{id}/{slug} pattern.
+
+    Structure per listing card:
+        <a href="/property/136/204--32-34-miller-street-bargara-qld"
+           title="204, 32-34 Miller Street, Bargara">
+          <span class="propertyList-location-address">204, 32-34 Miller Street</span>
+          <span class="propertyList-location-suburb">Bargara</span>
+          ...
+          <div class="listing-price">O/A $1,700,000</div>
+        </a>
+
+    The <a title> attribute contains the full "Street, Suburb" string and
+    is the most reliable address source. Each listing card often appears
+    TWICE in the DOM (two anchor tags per card) — deduplicated by address.
+
+    NOTE: localpropertyteam.com.au matches this signature but lists Bali
+    properties (slugs end in "-ba") — not a QLD agency. The URL exception
+    list should exclude it rather than trying to filter here.
+    """
+    # Require the platform signature before doing any heavier parsing
+    if "propertyList-location-suburb" not in html:
+        return None
+
+    listings = []
+    seen_addresses = set()
+
+    # Each listing is anchored by <a href="/property/{numeric-id}/...">
+    for a_match in re.finditer(
+        r'<a\s[^>]*href="(/property/\d+/[^"]+)"[^>]*title="([^"]+)"[^>]*>(.*?)</a>',
+        html, re.DOTALL
+    ):
+        href = a_match.group(1)
+        title = a_match.group(2).strip()
+        inner = a_match.group(3)
+
+        # Deduplicate — same card appears twice in DOM
+        if title in seen_addresses:
+            continue
+        seen_addresses.add(title)
+
+        # Suburb from inner span
+        suburb_match = re.search(
+            r'class="propertyList-location-suburb">([^<]+)<', inner
+        )
+        suburb = suburb_match.group(1).strip() if suburb_match else ""
+
+        # If no suburb from span, try splitting the title
+        if not suburb and "," in title:
+            suburb = title.split(",")[-1].strip()
+
+        # Price from listing-price div inside this anchor
+        price_match = re.search(
+            r'class="listing-price">([^<]+)<', inner
+        )
+        price_raw = price_match.group(1).strip() if price_match else ""
+        price = _parse_price(price_raw)
+
+        if not title:
+            continue
+
+        listings.append({
+            "address": title,
+            "suburb": suburb,
+            "postcode": "",
+            "price": price,
+            "status": "",
+            "tier": "propertylist_platform_pattern",
+        })
+
+    if not listings:
+        return None
+
+    if log:
+        log(
+            f"    [tier 3l: PropertyList platform - propertyList-location-suburb] "
+            f"matched, {len(listings)} listings"
+        )
+
+    return listings[0]
+
+
 def try_eagle_software_pattern(html, log=None):
     """
     Tier 3g. Confirmed real pattern (Living Estate Agents, platform:
@@ -1036,6 +1129,7 @@ def extract_listing_fields(html, listing_url, log=None, llm_api_key=None):
         # signals alone (a genuine active listing with no status text
         # at all) — see try_reapit_agentbox_pattern's own comments.
         try_rex_websites_pattern,
+        try_propertylist_platform_pattern,
         try_elders_franchise_pattern,
         try_reapit_agentbox_pattern,
         try_semibold_muted_pattern,
