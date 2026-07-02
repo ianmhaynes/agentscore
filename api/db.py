@@ -136,8 +136,9 @@ def record_scrape_result(office_id, listings, platform_detected=None, error=None
                         office_id, listing_url, address, suburb, postcode,
                         guide_price, sold_price, status, agent_name,
                         agent_email, agent_phone, source_adapter,
-                        extraction_confidence
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        extraction_confidence, date_listed, sold_date,
+                        days_on_market
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         office_id,
@@ -153,6 +154,9 @@ def record_scrape_result(office_id, listings, platform_detected=None, error=None
                         listing.get("agent_phone", ""),
                         listing.get("source_adapter", ""),
                         listing.get("extraction_confidence", ""),
+                        listing.get("date_listed", ""),
+                        listing.get("sold_date", ""),
+                        listing.get("days_on_market", ""),
                     ),
                 )
         conn.commit()
