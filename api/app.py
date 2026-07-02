@@ -684,3 +684,66 @@ def agent_scores_api():
 def scores_page():
     from flask import render_template
     return render_template("scores.html")
+
+
+@app.route("/api/agent-detail")
+def agent_detail_api():
+    from flask import jsonify, request
+    import datetime
+    agent_name = request.args.get("name", "").strip()
+    if not agent_name:
+        return jsonify({"error": "name parameter required"}), 400
+    def grade(v):
+        v = abs(v)
+        if v <= 3: return "A"
+        if v <= 7: return "B"
+        if v <= 12: return "C"
+        return "D"
+    conn = db.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT ls.address, ls.suburb, ls.guide_price, ls.sold_price,
+                       ls.status, ls.date_listed, ls.sold_date, ls.days_on_market,
+                       ls.listing_url, o.office_name, o.domain
+                FROM listing_snapshots ls
+                LEFT JOIN offices o ON o.id = ls.office_id
+                WHERE ls.agent_name = %s
+                ORDER BY ls.scraped_at DESC
+            """, (agent_name,))
+            rows = cur.fetchall()
+            cols = [d[0] for d in cur.description]
+    finally:
+        conn.close()
+    listings = []
+    variances = []
+    for row in rows:
+        r = dict(zip(cols, row))
+        guide = int(r["guide_price"]) if r["guide_price"] and str(r["guide_price"]).isdigit() else None
+        sold = int(r["sold_price"]) if r["sold_price"] and str(r["sold_price"]).isdigit() else None
+        variance = None
+        if guide and sold and guide > 50000 and sold > 50000:
+            ratio = sold / guide
+            if 0.5 <= ratio <= 2.0:
+                variance = round((sold - guide) / guide * 100, 1)
+                variances.append(variance)
+        listings.append({"address": r["address"], "suburb": r["suburb"],
+            "guide_price": guide, "sold_price": sold, "status": r["status"],
+            "date_listed": r["date_listed"] or "", "sold_date": r["sold_date"] or "",
+            "days_on_market": r["days_on_market"] or "", "listing_url": r["listing_url"],
+            "office_name": r["office_name"] or "", "domain": r["domain"] or "",
+            "variance": variance})
+    avg_variance = round(sum(variances)/len(variances), 1) if variances else None
+    resp = jsonify({"agent_name": agent_name, "total_listings": len(listings),
+        "scored_listings": len(variances), "avg_variance": avg_variance,
+        "grade": grade(avg_variance) if avg_variance is not None else None,
+        "listings": listings,
+        "generated_at": datetime.datetime.utcnow().isoformat() + "Z"})
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
+
+@app.route("/agent/<path:agent_name>")
+def agent_page(agent_name):
+    from flask import render_template
+    return render_template("agent.html", agent_name=agent_name)

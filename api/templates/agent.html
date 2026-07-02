@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title id="page-title">Agent Profile — AgentScore</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#F6F1E7;--paper-dim:#ECE5D4;--ink:#1B2A33;--ink-soft:#4A5A62;--rule:#C9BFA8;--verdigris:#4C7A6E;--ga:#2E7D5E;--gb:#7A6A1E;--gc:#8A5A2B;--gd:#93412E;--ga-bg:#E8F5F0;--gb-bg:#F9F4DC;--gc-bg:#FDF0E4;--gd-bg:#FBEAE7}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1100px;margin:0 auto;padding:48px 32px 80px}
+header{border-bottom:2px solid var(--ink);padding-bottom:20px;margin-bottom:32px;display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:12px}
+.wordmark{font-size:22px;font-weight:600;letter-spacing:-0.5px}
+.wordmark a{color:var(--ink);text-decoration:none}
+.wordmark span{color:var(--verdigris)}
+.nav-links{display:flex;gap:24px;font-size:13px}
+.nav-links a{color:var(--ink-soft);text-decoration:none}
+.nav-links a:hover{color:var(--ink);text-decoration:underline}
+.back-link{font-size:13px;color:var(--ink-soft);text-decoration:none;display:inline-flex;align-items:center;gap:4px;margin-bottom:24px}
+.back-link:hover{color:var(--ink)}
+
+/* Hero */
+.agent-hero{display:flex;align-items:flex-start;gap:24px;margin-bottom:36px;padding-bottom:32px;border-bottom:1px solid var(--rule);flex-wrap:wrap}
+.grade-circle{width:72px;height:72px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:700;flex-shrink:0}
+.grade-circle.A{background:var(--ga-bg);color:var(--ga);border:2px solid var(--ga)}
+.grade-circle.B{background:var(--gb-bg);color:var(--gb);border:2px solid var(--gb)}
+.grade-circle.C{background:var(--gc-bg);color:var(--gc);border:2px solid var(--gc)}
+.grade-circle.D{background:var(--gd-bg);color:var(--gd);border:2px solid var(--gd)}
+.grade-circle.none{background:var(--paper-dim);color:var(--ink-soft);border:2px solid var(--rule);font-size:20px}
+.agent-info{flex:1}
+.agent-name{font-size:26px;font-weight:600;letter-spacing:-0.5px;margin:0 0 4px}
+.agent-agency{font-size:15px;color:var(--ink-soft);margin:0 0 16px}
+.agent-stats{display:flex;gap:20px;flex-wrap:wrap}
+.stat{display:flex;flex-direction:column}
+.stat-val{font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:600;color:var(--ink);line-height:1}
+.stat-val.pos{color:var(--ga)}.stat-val.neg{color:var(--gd)}
+.stat-lbl{font-size:11px;color:var(--ink-soft);margin-top:3px;text-transform:uppercase;letter-spacing:.05em}
+
+/* Controls */
+.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.search-input{flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--rule);border-radius:6px;background:white;color:var(--ink);font-size:14px;font-family:'Inter',sans-serif;outline:none}
+.search-input:focus{border-color:var(--verdigris)}
+.filter-btns{display:flex;gap:6px}
+.filter-btn{padding:7px 12px;border-radius:5px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--rule);background:white;color:var(--ink-soft);font-family:'Inter',sans-serif}
+.f-all{background:var(--ink);color:white;border-color:var(--ink)}
+.f-sold{background:var(--ga-bg);color:var(--ga);border-color:var(--ga)}
+.f-active{background:var(--gb-bg);color:var(--gb);border-color:var(--gb)}
+.sort-group{margin-left:auto;display:flex;gap:4px;align-items:center}
+.sort-label{font-size:11px;color:var(--ink-soft);margin-right:4px;text-transform:uppercase;letter-spacing:.05em}
+.sort-btn{padding:6px 10px;border-radius:5px;font-size:12px;cursor:pointer;border:1px solid var(--rule);background:white;color:var(--ink-soft);font-family:'Inter',sans-serif}
+.sort-btn.active{background:var(--paper-dim);border-color:var(--ink);color:var(--ink);font-weight:500}
+.results-count{font-size:12px;color:var(--ink-soft);margin-bottom:12px}
+
+/* Table */
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px;min-width:700px}
+thead th{padding:10px 14px;text-align:left;font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.06em;font-weight:500;border-bottom:2px solid var(--ink);white-space:nowrap}
+thead th.r{text-align:right}
+tbody tr{border-bottom:1px solid var(--rule);transition:background .1s}
+tbody tr:hover{background:var(--paper-dim)}
+td{padding:12px 14px;vertical-align:middle}
+td.r{text-align:right}
+.address-cell .street{font-weight:600;color:var(--ink)}
+.address-cell .suburb{font-size:12px;color:var(--ink-soft);margin-top:2px}
+.status-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.status-badge.sold{background:var(--ga-bg);color:var(--ga)}
+.status-badge.active{background:var(--gb-bg);color:var(--gb)}
+.price-val{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--ink)}
+.price-val.none{color:var(--rule)}
+.variance-val{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600}
+.variance-val.pos{color:var(--ga)}.variance-val.neg{color:var(--gd)}.variance-val.none{color:var(--rule)}
+.dom-val{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--ink-soft)}
+.listing-link{font-size:12px;color:var(--verdigris);text-decoration:none}
+.listing-link:hover{text-decoration:underline}
+.loading-state{text-align:center;padding:80px;color:var(--ink-soft);font-size:14px;font-family:'JetBrains Mono',monospace}
+.empty-state{text-align:center;padding:60px;color:var(--ink-soft);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="wordmark"><a href="/">Agent<span>Score</span></a></div>
+  <nav class="nav-links"><a href="/">Scraper</a><a href="/scores">Agent Rankings</a></nav>
+</header>
+
+<a href="/scores" class="back-link">← Back to Rankings</a>
+
+<div id="loading" class="loading-state">Loading agent profile...</div>
+
+<div id="content" style="display:none">
+  <div class="agent-hero">
+    <div class="grade-circle none" id="grade-circle">—</div>
+    <div class="agent-info">
+      <h1 class="agent-name" id="agent-name"></h1>
+      <p class="agent-agency" id="agent-agency"></p>
+      <div class="agent-stats">
+        <div class="stat"><div class="stat-val" id="stat-total">—</div><div class="stat-lbl">Total Listings</div></div>
+        <div class="stat"><div class="stat-val" id="stat-scored">—</div><div class="stat-lbl">With Price Data</div></div>
+        <div class="stat"><div class="stat-val" id="stat-variance">—</div><div class="stat-lbl">Avg Variance</div></div>
+        <div class="stat"><div class="stat-val" id="stat-dom">—</div><div class="stat-lbl">Avg Days on Market</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <input class="search-input" type="text" id="search" placeholder="Search address or suburb…">
+    <div class="filter-btns">
+      <button class="filter-btn f-all" data-s="ALL">All</button>
+      <button class="filter-btn" data-s="Sold">Sold</button>
+      <button class="filter-btn" data-s="Active">Active</button>
+    </div>
+    <div class="sort-group">
+      <span class="sort-label">Sort</span>
+      <button class="sort-btn active" data-o="recent">Recent</button>
+      <button class="sort-btn" data-o="variance">Variance</button>
+      <button class="sort-btn" data-o="price">Price</button>
+    </div>
+  </div>
+
+  <div class="results-count" id="rcount"></div>
+
+  <div class="table-wrap">
+    <table id="tbl">
+      <thead><tr>
+        <th>Address</th>
+        <th>Status</th>
+        <th class="r">Guide</th>
+        <th class="r">Sold</th>
+        <th class="r">Variance</th>
+        <th class="r">DOM</th>
+        <th>Link</th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="empty-state" id="empty" style="display:none">No listings match your filters.</div>
+  </div>
+</div>
+</div>
+
+<script>
+const GRADE_COLORS = {A:'ga',B:'gb',C:'gc',D:'gd'};
+let all=[], sf='ALL', so='recent';
+
+function fmt(n){return n!=null?'$'+n.toLocaleString():'—'}
+function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+async function load(){
+  // Get agent name from URL path /agent/NAME
+  const name = decodeURIComponent(window.location.pathname.replace('/agent/',''));
+  document.title = name + ' — AgentScore';
+
+  try{
+    const d = await(await fetch('/api/agent-detail?name='+encodeURIComponent(name))).json();
+    if(d.error) throw new Error(d.error);
+    all = d.listings;
+
+    // Hero
+    document.getElementById('agent-name').textContent = d.agent_name;
+
+    // Agency — use most common office_name
+    const agencies = d.listings.map(l=>l.office_name).filter(Boolean);
+    const agency = agencies.length ? [...agencies].sort((a,b)=>
+      agencies.filter(x=>x===b).length - agencies.filter(x=>x===a).length)[0] : '';
+    document.getElementById('agent-agency').textContent = agency;
+
+    // Grade circle
+    const gc = document.getElementById('grade-circle');
+    if(d.grade){
+      gc.textContent = d.grade;
+      gc.className = 'grade-circle ' + d.grade;
+    }
+
+    // Stats
+    document.getElementById('stat-total').textContent = d.total_listings.toLocaleString();
+    document.getElementById('stat-scored').textContent = d.scored_listings.toLocaleString();
+
+    const vEl = document.getElementById('stat-variance');
+    if(d.avg_variance != null){
+      vEl.textContent = (d.avg_variance >= 0 ? '+' : '') + d.avg_variance.toFixed(1) + '%';
+      vEl.className = 'stat-val ' + (d.avg_variance >= 0 ? 'pos' : 'neg');
+    } else {
+      vEl.textContent = '—';
+    }
+
+    // DOM average
+    const doms = d.listings.map(l=>parseInt(l.days_on_market)).filter(n=>!isNaN(n)&&n>0);
+    const avgDom = doms.length ? Math.round(doms.reduce((a,b)=>a+b,0)/doms.length) : null;
+    document.getElementById('stat-dom').textContent = avgDom != null ? avgDom + ' days' : '—';
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+    render();
+  } catch(e){
+    document.getElementById('loading').textContent = 'Error: '+e.message;
+  }
+}
+
+function render(){
+  const q = document.getElementById('search').value.toLowerCase().trim();
+  let rows = [...all];
+  if(sf !== 'ALL') rows = rows.filter(r => (r.status||'').toLowerCase() === sf.toLowerCase());
+  if(q) rows = rows.filter(r =>
+    (r.address||'').toLowerCase().includes(q) ||
+    (r.suburb||'').toLowerCase().includes(q)
+  );
+  if(so === 'variance') rows.sort((a,b)=>(b.variance??-999)-(a.variance??-999));
+  else if(so === 'price') rows.sort((a,b)=>(b.sold_price||b.guide_price||0)-(a.sold_price||a.guide_price||0));
+  // else recent = default order from API
+
+  document.getElementById('rcount').textContent =
+    rows.length.toLocaleString()+' listing'+(rows.length!==1?'s':'')+(q||sf!=='ALL'?' matching filters':'');
+
+  const empty = document.getElementById('empty');
+  const tbody = document.getElementById('tbody');
+  if(!rows.length){tbody.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+
+  // Parse address into street + suburb
+  tbody.innerHTML = rows.map(r => {
+    const parts = (r.address||'').split(',');
+    const street = parts[0]||r.address||'';
+    const suburb = r.suburb || (parts[1]||'').trim();
+    const status = (r.status||'').toLowerCase();
+    const v = r.variance;
+    const vStr = v != null ? (v>=0?'+':'')+v.toFixed(1)+'%' : '—';
+    const vClass = v != null ? (v>=0?'pos':'neg') : 'none';
+    const dom = r.days_on_market ? r.days_on_market+' d' : '—';
+    return `<tr>
+<td><div class="address-cell"><div class="street">${esc(street)}</div><div class="suburb">${esc(suburb)}</div></div></td>
+<td><span class="status-badge ${status}">${esc(r.status||'—')}</span></td>
+<td class="r"><span class="price-val ${r.guide_price?'':'none'}">${fmt(r.guide_price)}</span></td>
+<td class="r"><span class="price-val ${r.sold_price?'':'none'}">${fmt(r.sold_price)}</span></td>
+<td class="r"><span class="variance-val ${vClass}">${vStr}</span></td>
+<td class="r"><span class="dom-val">${dom}</span></td>
+<td>${r.listing_url?`<a href="${esc(r.listing_url)}" target="_blank" class="listing-link">View</a>`:'—'}</td>
+</tr>`;
+  }).join('');
+}
+
+document.getElementById('search').addEventListener('input', render);
+document.querySelectorAll('.filter-btn').forEach(b=>b.addEventListener('click',()=>{
+  sf=b.dataset.s;
+  document.querySelectorAll('.filter-btn').forEach(x=>{x.className='filter-btn';});
+  const map={'ALL':'f-all','Sold':'f-sold','Active':'f-active'};
+  b.classList.add(map[sf]||'f-all');
+  render();
+}));
+document.querySelectorAll('.sort-btn').forEach(b=>b.addEventListener('click',()=>{
+  so=b.dataset.o;
+  document.querySelectorAll('.sort-btn').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  render();
+}));
+
+load();
+</script>
+</body>
+</html>
