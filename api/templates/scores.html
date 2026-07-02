@@ -168,7 +168,7 @@ function render(){
     return`<tr>
 <td><span class="rank-num">${a.rank}</span></td>
 <td><div class="grade-badge gb-${a.grade}">${a.grade}</div></td>
-<td><div class="agent-name">${esc(a.name)}</div>${subs?`<div class="agent-suburbs">${esc(subs)}</div>`:''}</td>
+<td><a href="/agent/${encodeURIComponent(a.name)}" style="text-decoration:none;color:inherit"><div class="agent-name" style="cursor:pointer">${esc(a.name)}</div>${subs?`<div class="agent-suburbs">${esc(subs)}</div>`:''}</a></td>
 <td><div class="var-cell"><div class="bar-wrap"><div class="bar-left">${!pos?`<div class="bar-fill neg" style="width:${pct}%"></div>`:''}</div><div class="bar-mid"></div><div class="bar-right">${pos?`<div class="bar-fill pos" style="width:${pct}%"></div>`:''}</div></div></div></td>
 <td class="r"><span class="var-val ${pos?'pos':'neg'}">${pos?'+':''}${v.toFixed(1)}%</span></td>
 <td class="r"><span class="sales-num">${a.sales}</span></td>
