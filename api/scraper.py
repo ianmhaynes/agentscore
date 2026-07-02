@@ -1203,11 +1203,27 @@ class GenericFallbackAdapter:
             self.browserless_call_count += 1
             found = self._collect_listing_urls(rendered_html, domain)
             if not found:
-                log("  Browserless returned rendered HTML, but no candidate listing URLs "
-                    "were found in it either — this site's structure is genuinely not "
-                    "covered, not just hidden behind JavaScript")
-                return []
-            log(f"  Browserless (JS-rendered homepage): found {len(found)} candidate listing URL(s)")
+                firecrawl_candidate_paths = [
+                    "/listings/?saleOrRental=Sale&sold=1",
+                    "/for-sale",
+                    "/properties/for-sale",
+                ]
+                for fc_path in firecrawl_candidate_paths:
+                    fc_url = domain + fc_path
+                    log(f"  Firecrawl: trying candidate path {fc_path} ...")
+                    fc_html = browserless_fallback.fetch_rendered_html(
+                        fc_url, self.browserless_api_key, log=log,
+                    )
+                    if fc_html:
+                        self.browserless_call_count += 1
+                        found = self._collect_listing_urls(fc_html, domain)
+                        if found:
+                            log(f"  Firecrawl ({fc_path}): found {len(found)} candidate listing URL(s)")
+                            break
+                if not found:
+                    log("  Firecrawl: no listing URLs found on any candidate path")
+                    return []
+            log(f"  Firecrawl (JS-rendered): found {len(found)} candidate listing URL(s)")
             listing_urls.update(found)
             # A site whose LISTING LINKS only exist after JS runs is a
             # strong real signal that its listing DATA likely works the
