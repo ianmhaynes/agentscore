@@ -372,7 +372,7 @@ def scrape():
     # candidate path finds zero listing URLs at all (confirmed real
     # need: LJ Hooker's HubSpot platform generation, June 2026). Same
     # per-request, never-stored pattern as the other two keys above.
-    browserless_api_key = data.get("browserlessApiKey", "").strip() or None
+    browserless_api_key = data.get("browserlessApiKey", "").strip() or os.environ.get("FIRECRAWL_API_KEY")
 
     log_lines = []
 
